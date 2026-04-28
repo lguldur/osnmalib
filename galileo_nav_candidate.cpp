@@ -1,0 +1,435 @@
+#include "galileo_nav_candidate.h"
+
+#include <cstring>
+
+#include "osnma_bit_utils.h"
+
+bool GalileoNavCandidate::HasWord(int32_t wt) const
+{
+    if (wt < 0 || wt > GAL_MAX_WT)
+        return false;
+
+    return words[wt].valid;
+}
+
+bool GalileoNavCandidate::HasCedData() const
+{
+    return HasWord(GAL_WT1) &&
+        HasWord(GAL_WT2) &&
+        HasWord(GAL_WT3) &&
+        HasWord(GAL_WT4) &&
+        HasWord(GAL_WT5);
+}
+
+bool GalileoNavCandidate::HasTimingData() const
+{
+    return HasWord(GAL_WT6) &&
+        HasWord(GAL_WT10);
+}
+
+bool GalileoNavCandidate::IsComplete() const
+{
+    return HasCedData();
+}
+
+void GalileoNavCandidateStore::Reset()
+{
+    candidates_.clear();
+}
+
+bool GalileoNavCandidateStore::FeedPage(const GalileoInavPageParts& page,
+    AuthReason& reason_out)
+{
+    reason_out = AuthReason::None;
+
+    if (page.prn <= 0)
+    {
+        reason_out = AuthReason::InvalidPrn;
+        return false;
+    }
+
+    if (!page.crc_ok)
+    {
+        reason_out = AuthReason::InvalidFrameFormat;
+        return false;
+    }
+
+    if (!IsTimeValid(page.page_epoch))
+    {
+        reason_out = AuthReason::InvalidTime;
+        return false;
+    }
+
+    if (page.even == nullptr || page.odd == nullptr)
+    {
+        reason_out = AuthReason::InvalidFrameFormat;
+        return false;
+    }
+
+    Cleanup(page.page_epoch);
+
+    const PageHeader header = ExtractPageHeader(page);
+
+    if (!header.valid)
+    {
+        reason_out = AuthReason::UnsupportedMessage;
+        return false;
+    }
+
+    if (header.wt >= GAL_WT1 && header.wt <= GAL_WT5)
+        return FeedCedPage(page, header, reason_out);
+
+    if (header.wt == GAL_WT6 || header.wt == GAL_WT10)
+        return FeedTimingPage(page, header, reason_out);
+
+    reason_out = AuthReason::UnsupportedMessage;
+    return false;
+}
+
+bool GalileoNavCandidateStore::FeedCedPage(const GalileoInavPageParts& page,
+    const PageHeader& header,
+    AuthReason& reason_out)
+{
+    const Key key(page.prn, header.iod);
+
+    auto it = candidates_.find(key);
+
+    if (it == candidates_.end())
+    {
+        if (header.wt != GAL_WT1)
+        {
+            reason_out = AuthReason::WaitingForMoreFrames;
+            return false;
+        }
+
+        GalileoNavCandidate candidate{};
+        candidate.prn = page.prn;
+        candidate.iod = header.iod;
+        candidate.toe = header.toe;
+        candidate.creation_time = page.page_epoch;
+        candidate.last_update_time = page.page_epoch;
+
+        StoreWord(candidate, page, header.wt);
+
+        candidate.complete = candidate.IsComplete();
+
+        candidates_[key] = candidate;
+
+        reason_out = AuthReason::None;
+        return true;
+    }
+
+    GalileoNavCandidate& candidate = it->second;
+
+    if (!CanAcceptCedWord(candidate, header.wt))
+    {
+        reason_out = AuthReason::WaitingForMoreFrames;
+        return false;
+    }
+
+    if (candidate.HasWord(header.wt))
+    {
+        reason_out = AuthReason::WaitingForMoreFrames;
+        return false;
+    }
+
+    if (candidate.toe >= 0 && header.toe >= 0 && candidate.toe != header.toe)
+    {
+        reason_out = AuthReason::TimeInconsistency;
+        return false;
+    }
+
+    StoreWord(candidate, page, header.wt);
+
+    candidate.last_update_time = page.page_epoch;
+    candidate.complete = candidate.IsComplete();
+
+    reason_out = AuthReason::None;
+    return true;
+}
+
+bool GalileoNavCandidateStore::FeedTimingPage(const GalileoInavPageParts& page,
+    const PageHeader& header,
+    AuthReason& reason_out)
+{
+    const Key key(page.prn, -1);
+
+    auto it = candidates_.find(key);
+
+    if (it == candidates_.end())
+    {
+        GalileoNavCandidate candidate{};
+        candidate.prn = page.prn;
+        candidate.iod = -1;
+        candidate.toe = -1;
+        candidate.creation_time = page.page_epoch;
+        candidate.last_update_time = page.page_epoch;
+
+        StoreWord(candidate, page, header.wt);
+
+        candidates_[key] = candidate;
+
+        reason_out = AuthReason::None;
+        return true;
+    }
+
+    GalileoNavCandidate& candidate = it->second;
+
+    /*
+        Timing parameters are not WT1-anchored.
+        Keep the latest WT6 / WT10 pair for ADKD=4.
+    */
+
+    StoreWord(candidate, page, header.wt);
+
+    candidate.last_update_time = page.page_epoch;
+
+    reason_out = AuthReason::None;
+    return true;
+}
+
+void GalileoNavCandidateStore::Cleanup(const GnssTime& now)
+{
+    if (!IsTimeValid(now))
+        return;
+
+    for (auto it = candidates_.begin(); it != candidates_.end(); )
+    {
+        if (IsExpired(it->second, now))
+            it = candidates_.erase(it);
+        else
+            ++it;
+    }
+}
+
+const GalileoNavCandidate*
+GalileoNavCandidateStore::FindComplete(int32_t prn,
+    int32_t iod,
+    const GnssTime& now) const
+{
+    if (prn <= 0)
+        return nullptr;
+
+    if (!IsTimeValid(now))
+        return nullptr;
+
+    if (iod >= 0)
+    {
+        const Key key(prn, iod);
+
+        auto it = candidates_.find(key);
+
+        if (it == candidates_.end())
+            return nullptr;
+
+        const GalileoNavCandidate& candidate = it->second;
+
+        if (!candidate.HasCedData())
+            return nullptr;
+
+        if (IsExpired(candidate, now))
+            return nullptr;
+
+        return &candidate;
+    }
+
+    const GalileoNavCandidate* best = nullptr;
+
+    for (const auto& kv : candidates_)
+    {
+        const GalileoNavCandidate& candidate = kv.second;
+
+        if (candidate.prn != prn)
+            continue;
+
+        if (!candidate.HasCedData())
+            continue;
+
+        if (IsExpired(candidate, now))
+            continue;
+
+        if (best == nullptr)
+        {
+            best = &candidate;
+            continue;
+        }
+
+        const double candidate_age =
+            DiffSeconds(now, candidate.last_update_time);
+
+        const double best_age =
+            DiffSeconds(now, best->last_update_time);
+
+        if (candidate_age >= 0.0 &&
+            best_age >= 0.0 &&
+            candidate_age < best_age)
+        {
+            best = &candidate;
+        }
+    }
+
+    return best;
+}
+
+const GalileoNavCandidate*
+GalileoNavCandidateStore::FindForAdkd(int32_t prn,
+    OsnmaAdkd adkd,
+    const GnssTime& now) const
+{
+    if (adkd == OsnmaAdkd::InavCed ||
+        adkd == OsnmaAdkd::SlowMac)
+    {
+        return FindComplete(prn, -1, now);
+    }
+
+    if (adkd == OsnmaAdkd::InavTiming)
+    {
+        const Key key(prn, -1);
+
+        auto it = candidates_.find(key);
+
+        if (it == candidates_.end())
+            return nullptr;
+
+        const GalileoNavCandidate& candidate = it->second;
+
+        if (!candidate.HasTimingData())
+            return nullptr;
+
+        if (IsExpired(candidate, now))
+            return nullptr;
+
+        return &candidate;
+    }
+
+    return nullptr;
+}
+
+GalileoNavCandidateStore::PageHeader
+GalileoNavCandidateStore::ExtractPageHeader(const GalileoInavPageParts& page)
+{
+    PageHeader header{};
+
+    if (page.even == nullptr)
+        return header;
+
+    /*
+        Centralized Galileo I/NAV header extraction.
+
+        IMPORTANT:
+        These offsets still depend on your receiver-provided 120-bit layout.
+        If the DLL includes sync/tail/reserved alignment differently, fix only here.
+    */
+
+    static constexpr int32_t WT_FIRST_BIT = 0;
+    static constexpr int32_t WT_BIT_COUNT = 6;
+
+    static constexpr int32_t IODNAV_FIRST_BIT = 6;
+    static constexpr int32_t IODNAV_BIT_COUNT = 10;
+
+    static constexpr int32_t TOE_FIRST_BIT = 16;
+    static constexpr int32_t TOE_BIT_COUNT = 14;
+
+    header.wt =
+        GetUnsignedBitsMsb0(page.even,
+            WT_FIRST_BIT,
+            WT_BIT_COUNT);
+
+    if (!IsSupportedWordType(header.wt))
+        return header;
+
+    if (header.wt >= GAL_WT1 && header.wt <= GAL_WT5)
+    {
+        header.iod =
+            GetUnsignedBitsMsb0(page.even,
+                IODNAV_FIRST_BIT,
+                IODNAV_BIT_COUNT);
+
+        header.toe =
+            GetUnsignedBitsMsb0(page.even,
+                TOE_FIRST_BIT,
+                TOE_BIT_COUNT);
+
+        if (header.iod < 0)
+            return header;
+    }
+    else
+    {
+        header.iod = -1;
+        header.toe = -1;
+    }
+
+    header.valid = true;
+    return header;
+}
+
+bool GalileoNavCandidateStore::IsSupportedWordType(int32_t wt)
+{
+    return (wt >= GAL_WT1 && wt <= GAL_WT6) ||
+        (wt == GAL_WT10);
+}
+
+bool GalileoNavCandidateStore::CanAcceptCedWord(const GalileoNavCandidate& candidate,
+    int32_t wt)
+{
+    switch (wt)
+    {
+    case GAL_WT1:
+        return false;
+
+    case GAL_WT2:
+        return candidate.HasWord(GAL_WT1);
+
+    case GAL_WT3:
+        return candidate.HasWord(GAL_WT2);
+
+    case GAL_WT4:
+        return candidate.HasWord(GAL_WT3);
+
+    case GAL_WT5:
+        return candidate.HasWord(GAL_WT4);
+
+    default:
+        return false;
+    }
+}
+
+bool GalileoNavCandidateStore::IsExpired(const GalileoNavCandidate& candidate,
+    const GnssTime& now)
+{
+    if (!IsTimeValid(candidate.creation_time) ||
+        !IsTimeValid(candidate.last_update_time))
+    {
+        return true;
+    }
+
+    const double age_s =
+        DiffSeconds(now, candidate.creation_time);
+
+    const double idle_s =
+        DiffSeconds(now, candidate.last_update_time);
+
+    if (age_s < 0.0 || idle_s < 0.0)
+        return true;
+
+    if (candidate.HasCedData() || candidate.HasTimingData())
+        return age_s > COMPLETE_LIFETIME_S;
+
+    return idle_s > PARTIAL_TIMEOUT_S;
+}
+
+void GalileoNavCandidateStore::StoreWord(GalileoNavCandidate& candidate,
+    const GalileoInavPageParts& page,
+    int32_t wt)
+{
+    if (wt < 0 || wt > GAL_MAX_WT)
+        return;
+
+    GalileoNavWord& word = candidate.words[wt];
+
+    word.wt = wt;
+    word.valid = true;
+
+    std::memcpy(word.even.data(), page.even, GAL_INAV_BYTES);
+    std::memcpy(word.odd.data(), page.odd, GAL_INAV_BYTES);
+}

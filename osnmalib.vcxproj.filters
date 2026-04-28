@@ -1,0 +1,47 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClInclude Include="auth_record.h" />
+    <ClInclude Include="galileo_inav_page_parts.h" />
+    <ClInclude Include="gnss_time.h" />
+    <ClInclude Include="nav_signal_source.h" />
+    <ClInclude Include="osnma_authenticator.h" />
+    <ClInclude Include="osnma_bit_utils.h" />
+    <ClInclude Include="osnma_crypto.h" />
+    <ClInclude Include="osnma_dsm.h" />
+    <ClInclude Include="osnma_dsm_content.h" />
+    <ClInclude Include="osnma_dsm_parser.h" />
+    <ClInclude Include="osnma_engine.h" />
+    <ClInclude Include="osnma_kroot_verify.h" />
+    <ClInclude Include="osnma_mack.h" />
+    <ClInclude Include="osnma_merkle.h" />
+    <ClInclude Include="osnma_page_parser.h" />
+    <ClInclude Include="osnma_subframe_assembler.h" />
+    <ClInclude Include="osnma_trust_store.h" />
+    <ClInclude Include="osnma_types.h" />
+    <ClInclude Include="galileo_auth_data_fifo.h" />
+    <ClInclude Include="galileo_nav_candidate.h" />
+    <ClInclude Include="osnma_mac_input.h" />
+    <ClInclude Include="osnma_mac_verifier.h" />
+    <ClInclude Include="osnma_tesla_chain.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="osnma_authenticator.cpp" />
+    <ClCompile Include="osnma_crypto.cpp" />
+    <ClCompile Include="osnma_dsm.cpp" />
+    <ClCompile Include="osnma_dsm_content.cpp" />
+    <ClCompile Include="osnma_dsm_parser.cpp" />
+    <ClCompile Include="osnma_engine.cpp" />
+    <ClCompile Include="osnma_kroot_verify.cpp" />
+    <ClCompile Include="osnma_mack.cpp" />
+    <ClCompile Include="osnma_merkle.cpp" />
+    <ClCompile Include="osnma_page_parser.cpp" />
+    <ClCompile Include="osnma_subframe_assembler.cpp" />
+    <ClCompile Include="osnma_trust_store.cpp" />
+    <ClCompile Include="galileo_auth_data_fifo.cpp" />
+    <ClCompile Include="galileo_nav_candidate.cpp" />
+    <ClCompile Include="osnma_mac_input.cpp" />
+    <ClCompile Include="osnma_mac_verifier.cpp" />
+    <ClCompile Include="osnma_tesla_chain.cpp" />
+  </ItemGroup>
+</Project>
