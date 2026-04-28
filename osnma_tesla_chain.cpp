@@ -16,6 +16,8 @@ void OsnmaTeslaChain::Reset()
     root_wn_ = -1;
     root_towh_ = -1;
 
+    mac_lookup_table_ = -1;
+
     alpha_ = 0;
 
     for (auto& k : keys_)
@@ -23,7 +25,7 @@ void OsnmaTeslaChain::Reset()
 }
 
 bool OsnmaTeslaChain::InitializeFromKroot(const OsnmaDsmKroot& kroot,
-    AuthReason& reason_out)
+                                          AuthReason& reason_out)
 {
     Reset();
 
@@ -84,6 +86,8 @@ bool OsnmaTeslaChain::InitializeFromKroot(const OsnmaDsmKroot& kroot,
     root_wn_ = kroot.kroot_wn;
     root_towh_ = kroot.kroot_towh;
 
+    mac_lookup_table_ = kroot.mac_lookup_table;
+
     alpha_ = kroot.alpha;
 
     initialized_ = true;
@@ -93,9 +97,9 @@ bool OsnmaTeslaChain::InitializeFromKroot(const OsnmaDsmKroot& kroot,
     root_time.tow = static_cast<double>(root_towh_) * 3600.0;
 
     return StoreVerifiedKey(0,
-        root_time,
-        kroot.kroot.data(),
-        kroot.kroot_size_bytes);
+                            root_time,
+                            kroot.kroot.data(),
+                            kroot.kroot_size_bytes);
 }
 
 bool OsnmaTeslaChain::IsInitialized() const
@@ -104,7 +108,7 @@ bool OsnmaTeslaChain::IsInitialized() const
 }
 
 bool OsnmaTeslaChain::VerifyAndStoreDisclosedKey(const OsnmaMackMessage& mack,
-    AuthReason& reason_out)
+                                                 AuthReason& reason_out)
 {
     reason_out = AuthReason::None;
 
@@ -148,8 +152,8 @@ bool OsnmaTeslaChain::VerifyAndStoreDisclosedKey(const OsnmaMackMessage& mack,
         const KeyEntry& existing = keys_[existing_slot];
 
         if (ConstantTimeEqual(existing.key.data(),
-            mack.disclosed_key.data(),
-            key_size_bytes_))
+                              mack.disclosed_key.data(),
+                              key_size_bytes_))
         {
             reason_out = AuthReason::None;
             return true;
@@ -161,8 +165,8 @@ bool OsnmaTeslaChain::VerifyAndStoreDisclosedKey(const OsnmaMackMessage& mack,
 
     const bool verified =
         VerifyAgainstKnownKey(key_index,
-            mack.disclosed_key.data(),
-            key_size_bytes_);
+                              mack.disclosed_key.data(),
+                              key_size_bytes_);
 
     if (!verified)
     {
@@ -172,9 +176,9 @@ bool OsnmaTeslaChain::VerifyAndStoreDisclosedKey(const OsnmaMackMessage& mack,
 
     const bool stored =
         StoreVerifiedKey(key_index,
-            mack.subframe_epoch,
-            mack.disclosed_key.data(),
-            key_size_bytes_);
+                         mack.subframe_epoch,
+                         mack.disclosed_key.data(),
+                         key_size_bytes_);
 
     if (!stored)
     {
@@ -187,9 +191,9 @@ bool OsnmaTeslaChain::VerifyAndStoreDisclosedKey(const OsnmaMackMessage& mack,
 }
 
 bool OsnmaTeslaChain::GetKeyForTag(const OsnmaMackMessage& mack,
-    const OsnmaMackTagInfo& tag,
-    const std::uint8_t*& key,
-    int32_t& key_size_bytes) const
+                                   const OsnmaMackTagInfo& tag,
+                                   const std::uint8_t*& key,
+                                   int32_t& key_size_bytes) const
 {
     key = nullptr;
     key_size_bytes = 0;
@@ -200,27 +204,14 @@ bool OsnmaTeslaChain::GetKeyForTag(const OsnmaMackMessage& mack,
     if (!mack.valid_layout || !tag.valid_info)
         return false;
 
-    const int32_t disclosure_index =
-        ComputeDisclosureIndex(mack.subframe_epoch);
+    const int32_t target_key_index =
+        ComputeKeyIndexForTag(mack, tag);
 
-    if (disclosure_index < 0)
+    if (target_key_index < 0)
         return false;
 
-    /*
-        Current simplified key selection.
-
-        For now, use the verified disclosed key associated with this MACK
-        subframe, or the closest previous verified key if exact index is not
-        present.
-
-        The final OSNMA version must refine this with the exact TESLA key
-        delay / tag-to-key mapping from the ICD.
-    */
-
-    int32_t slot = FindKeySlot(disclosure_index);
-
-    if (slot < 0)
-        slot = FindClosestKeySlot(disclosure_index);
+    const int32_t slot =
+        FindKeySlot(target_key_index);
 
     if (slot < 0)
         return false;
@@ -287,25 +278,6 @@ int32_t OsnmaTeslaChain::FindKeySlot(int32_t key_index) const
     return -1;
 }
 
-int32_t OsnmaTeslaChain::FindClosestKeySlot(int32_t key_index) const
-{
-    int32_t best = -1;
-
-    for (int32_t i = 0; i < MAX_STORED_KEYS; ++i)
-    {
-        if (!keys_[i].valid || !keys_[i].verified)
-            continue;
-
-        if (keys_[i].index > key_index)
-            continue;
-
-        if (best < 0 || keys_[i].index > keys_[best].index)
-            best = i;
-    }
-
-    return best;
-}
-
 int32_t OsnmaTeslaChain::ComputeDisclosureIndex(const GnssTime& time) const
 {
     if (!initialized_)
@@ -325,10 +297,67 @@ int32_t OsnmaTeslaChain::ComputeDisclosureIndex(const GnssTime& time) const
     return static_cast<int32_t>(dt_s / TESLA_STEP_S);
 }
 
+int32_t OsnmaTeslaChain::ComputeKeyIndexForTag(const OsnmaMackMessage& mack,
+                                               const OsnmaMackTagInfo& tag) const
+{
+    const int32_t disclosure_index =
+        ComputeDisclosureIndex(mack.subframe_epoch);
+
+    if (disclosure_index < 0)
+        return -1;
+
+    const int32_t delay_subframes =
+        GetKeyDelaySubframes(mack, tag);
+
+    if (delay_subframes <= 0)
+        return -1;
+
+    const int32_t target =
+        disclosure_index - delay_subframes;
+
+    if (target < 0)
+        return -1;
+
+    return target;
+}
+
+int32_t OsnmaTeslaChain::GetKeyDelaySubframes(const OsnmaMackMessage& mack,
+                                              const OsnmaMackTagInfo& tag) const
+{
+    (void)mack;
+
+    /*
+        Centralized TESLA key-delay policy.
+
+        This is intentionally isolated because the final mapping depends on:
+        - MAC lookup table from KROOT
+        - MACSEQ
+        - ADKD
+        - tag position
+
+        Current safe defaults:
+        - ADKD=0 and ADKD=4: previous subframe key
+        - ADKD=12: extended delay placeholder
+
+        Replace this function when the MACLT-specific table is implemented.
+    */
+
+    if (tag.adkd == OsnmaAdkd::InavCed)
+        return 1;
+
+    if (tag.adkd == OsnmaAdkd::InavTiming)
+        return 1;
+
+    if (tag.adkd == OsnmaAdkd::SlowMac)
+        return 11;
+
+    return -1;
+}
+
 bool OsnmaTeslaChain::StoreVerifiedKey(int32_t key_index,
-    const GnssTime& time,
-    const std::uint8_t* key,
-    int32_t key_size_bytes)
+                                       const GnssTime& time,
+                                       const std::uint8_t* key,
+                                       int32_t key_size_bytes)
 {
     if (key == nullptr)
         return false;
@@ -346,8 +375,8 @@ bool OsnmaTeslaChain::StoreVerifiedKey(int32_t key_index,
         KeyEntry& existing = keys_[existing_slot];
 
         return ConstantTimeEqual(existing.key.data(),
-            key,
-            key_size_bytes);
+                                 key,
+                                 key_size_bytes);
     }
 
     int32_t slot = FindFreeSlot();
@@ -382,15 +411,15 @@ bool OsnmaTeslaChain::StoreVerifiedKey(int32_t key_index,
     entry.size_bytes = key_size_bytes;
 
     std::memcpy(entry.key.data(),
-        key,
-        static_cast<size_t>(key_size_bytes));
+                key,
+                static_cast<size_t>(key_size_bytes));
 
     return true;
 }
 
 bool OsnmaTeslaChain::VerifyAgainstKnownKey(int32_t candidate_index,
-    const std::uint8_t* candidate_key,
-    int32_t candidate_key_size_bytes) const
+                                            const std::uint8_t* candidate_key,
+                                            int32_t candidate_key_size_bytes) const
 {
     if (!initialized_)
         return false;
@@ -417,25 +446,25 @@ bool OsnmaTeslaChain::VerifyAgainstKnownKey(int32_t candidate_index,
 
         std::array<std::uint8_t, MAX_KEY_BYTES> current{};
         std::memcpy(current.data(),
-            candidate_key,
-            static_cast<size_t>(candidate_key_size_bytes));
+                    candidate_key,
+                    static_cast<size_t>(candidate_key_size_bytes));
 
         int32_t current_size = candidate_key_size_bytes;
 
         bool transform_ok = true;
 
         for (int32_t step = candidate_index;
-            step > known.index;
-            --step)
+             step > known.index;
+             --step)
         {
             std::array<std::uint8_t, MAX_KEY_BYTES> next{};
             int32_t next_size = 0;
 
             if (!TransformOneStep(current.data(),
-                current_size,
-                next.data(),
-                static_cast<int32_t>(next.size()),
-                next_size))
+                                  current_size,
+                                  next.data(),
+                                  static_cast<int32_t>(next.size()),
+                                  next_size))
             {
                 transform_ok = false;
                 break;
@@ -452,8 +481,8 @@ bool OsnmaTeslaChain::VerifyAgainstKnownKey(int32_t candidate_index,
             continue;
 
         if (ConstantTimeEqual(current.data(),
-            known.key.data(),
-            known.size_bytes))
+                              known.key.data(),
+                              known.size_bytes))
         {
             return true;
         }
@@ -463,10 +492,10 @@ bool OsnmaTeslaChain::VerifyAgainstKnownKey(int32_t candidate_index,
 }
 
 bool OsnmaTeslaChain::TransformOneStep(const std::uint8_t* input_key,
-    int32_t input_key_size_bytes,
-    std::uint8_t* output_key,
-    int32_t output_key_capacity_bytes,
-    int32_t& output_key_size_bytes) const
+                                       int32_t input_key_size_bytes,
+                                       std::uint8_t* output_key,
+                                       int32_t output_key_capacity_bytes,
+                                       int32_t& output_key_size_bytes) const
 {
     output_key_size_bytes = 0;
 
@@ -486,8 +515,8 @@ bool OsnmaTeslaChain::TransformOneStep(const std::uint8_t* input_key,
     if (hash_function_ == OsnmaHashFunction::Sha256)
     {
         ok = OsnmaSha256(input_key,
-            input_key_size_bytes,
-            digest.data());
+                         input_key_size_bytes,
+                         digest.data());
     }
     else if (hash_function_ == OsnmaHashFunction::Sha3_256)
     {
@@ -502,16 +531,16 @@ bool OsnmaTeslaChain::TransformOneStep(const std::uint8_t* input_key,
         return false;
 
     std::memcpy(output_key,
-        digest.data(),
-        static_cast<size_t>(key_size_bytes_));
+                digest.data(),
+                static_cast<size_t>(key_size_bytes_));
 
     output_key_size_bytes = key_size_bytes_;
     return true;
 }
 
 bool OsnmaTeslaChain::ConstantTimeEqual(const std::uint8_t* a,
-    const std::uint8_t* b,
-    int32_t size_bytes)
+                                        const std::uint8_t* b,
+                                        int32_t size_bytes)
 {
     if (a == nullptr || b == nullptr)
         return false;

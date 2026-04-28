@@ -18,17 +18,17 @@ public:
     void Reset();
 
     bool InitializeFromKroot(const OsnmaDsmKroot& kroot,
-        AuthReason& reason_out);
+                             AuthReason& reason_out);
 
     bool IsInitialized() const;
 
     bool VerifyAndStoreDisclosedKey(const OsnmaMackMessage& mack,
-        AuthReason& reason_out);
+                                    AuthReason& reason_out);
 
     bool GetKeyForTag(const OsnmaMackMessage& mack,
-        const OsnmaMackTagInfo& tag,
-        const std::uint8_t*& key,
-        int32_t& key_size_bytes) const;
+                      const OsnmaMackTagInfo& tag,
+                      const std::uint8_t*& key,
+                      int32_t& key_size_bytes) const;
 
     bool HasKey(int32_t key_index) const;
 
@@ -60,6 +60,8 @@ private:
     int32_t root_wn_ = -1;
     int32_t root_towh_ = -1;
 
+    int32_t mac_lookup_table_ = -1;
+
     std::uint64_t alpha_ = 0;
 
     std::array<KeyEntry, MAX_STORED_KEYS> keys_{};
@@ -69,26 +71,30 @@ private:
 
     int32_t FindKeySlot(int32_t key_index) const;
 
-    int32_t FindClosestKeySlot(int32_t key_index) const;
-
     int32_t ComputeDisclosureIndex(const GnssTime& time) const;
 
+    int32_t ComputeKeyIndexForTag(const OsnmaMackMessage& mack,
+                                  const OsnmaMackTagInfo& tag) const;
+
+    int32_t GetKeyDelaySubframes(const OsnmaMackMessage& mack,
+                                 const OsnmaMackTagInfo& tag) const;
+
     bool StoreVerifiedKey(int32_t key_index,
-        const GnssTime& time,
-        const std::uint8_t* key,
-        int32_t key_size_bytes);
+                          const GnssTime& time,
+                          const std::uint8_t* key,
+                          int32_t key_size_bytes);
 
     bool VerifyAgainstKnownKey(int32_t candidate_index,
-        const std::uint8_t* candidate_key,
-        int32_t candidate_key_size_bytes) const;
+                               const std::uint8_t* candidate_key,
+                               int32_t candidate_key_size_bytes) const;
 
     bool TransformOneStep(const std::uint8_t* input_key,
-        int32_t input_key_size_bytes,
-        std::uint8_t* output_key,
-        int32_t output_key_capacity_bytes,
-        int32_t& output_key_size_bytes) const;
+                          int32_t input_key_size_bytes,
+                          std::uint8_t* output_key,
+                          int32_t output_key_capacity_bytes,
+                          int32_t& output_key_size_bytes) const;
 
     static bool ConstantTimeEqual(const std::uint8_t* a,
-        const std::uint8_t* b,
-        int32_t size_bytes);
+                                  const std::uint8_t* b,
+                                  int32_t size_bytes);
 };
