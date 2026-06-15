@@ -3,6 +3,7 @@
 #include <cstring>
 
 #include "osnma_crypto.h"
+#include "osnma_mac_lookup.h"
 
 void OsnmaTeslaChain::Reset()
 {
@@ -322,36 +323,21 @@ int32_t OsnmaTeslaChain::ComputeKeyIndexForTag(const OsnmaMackMessage& mack,
 }
 
 int32_t OsnmaTeslaChain::GetKeyDelaySubframes(const OsnmaMackMessage& mack,
-                                              const OsnmaMackTagInfo& tag) const
+    const OsnmaMackTagInfo& tag) const
 {
-    (void)mack;
+    if (mac_lookup_table_ < 0)
+        return -1;
 
-    /*
-        Centralized TESLA key-delay policy.
+    if (!OsnmaMacLookupTable::IsTagConsistent(mac_lookup_table_,
+        mack.macseq,
+        tag))
+    {
+        return -1;
+    }
 
-        This is intentionally isolated because the final mapping depends on:
-        - MAC lookup table from KROOT
-        - MACSEQ
-        - ADKD
-        - tag position
-
-        Current safe defaults:
-        - ADKD=0 and ADKD=4: previous subframe key
-        - ADKD=12: extended delay placeholder
-
-        Replace this function when the MACLT-specific table is implemented.
-    */
-
-    if (tag.adkd == OsnmaAdkd::InavCed)
-        return 1;
-
-    if (tag.adkd == OsnmaAdkd::InavTiming)
-        return 1;
-
-    if (tag.adkd == OsnmaAdkd::SlowMac)
-        return 11;
-
-    return -1;
+    return OsnmaMacLookupTable::GetNominalDelaySubframes(mac_lookup_table_,
+        mack.macseq,
+        tag);
 }
 
 bool OsnmaTeslaChain::StoreVerifiedKey(int32_t key_index,
