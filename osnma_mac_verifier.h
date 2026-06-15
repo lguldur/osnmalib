@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <vector>
 
 #include "galileo_nav_candidate.h"
 #include "osnma_dsm_content.h"
@@ -27,7 +28,17 @@ public:
         const GnssTime& now) const;
 
 private:
-    static bool VerifyMacseq(const OsnmaMackMessage& mack,
+    enum class MacseqStatus
+    {
+        Ok = 0,
+        WaitingForKey,
+        InvalidFrameFormat,
+        UnsupportedMessage,
+        MackVerificationFailed
+    };
+
+private:
+    static MacseqStatus VerifyMacseq(const OsnmaMackMessage& mack,
         const OsnmaTeslaChain& tesla_chain,
         OsnmaMacFunction mac_function);
 
@@ -37,6 +48,8 @@ private:
 
     static void AppendGstSf32(const GnssTime& time,
         std::vector<std::uint8_t>& out);
+
+    static AuthReason ReasonFromMacseqStatus(MacseqStatus status);
 
     static bool ComputeMac(OsnmaMacFunction mac_function,
         const std::uint8_t* key,

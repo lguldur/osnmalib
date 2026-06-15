@@ -388,8 +388,8 @@ GalileoNavCandidateStore::ExtractPageHeader(const GalileoInavPageParts& page)
         Centralized Galileo I/NAV header extraction.
 
         IMPORTANT:
-        These offsets still depend on your receiver-provided 120-bit layout.
-        If the DLL includes sync/tail/reserved alignment differently, fix only here.
+        These offsets assume the receiver provides the same 128-bit MSB-first
+        INAV word image used by the OSNMA ADKD masks.
     */
 
     static constexpr int32_t WT_FIRST_BIT = 0;

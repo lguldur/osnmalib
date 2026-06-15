@@ -31,14 +31,19 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
         MACSEQ authenticates:
             PRNA || GST_SF || tag_info of FLX slots
 
-        The key is the same next-subframe TESLA key used for normal ADKD=0
-        authentication.
+        If the future TESLA key is not available yet, this is not a MAC
+        failure. The pending MACK must remain queued.
     */
-    if (!VerifyMacseq(mack,
-        tesla_chain,
-        mac_function))
+    const MacseqStatus macseq_status =
+        VerifyMacseq(mack,
+            tesla_chain,
+            mac_function);
+
+    if (macseq_status != MacseqStatus::Ok)
     {
-        result.reason = AuthReason::MackVerificationFailed;
+        result.reason =
+            ReasonFromMacseqStatus(macseq_status);
+
         return result;
     }
 
@@ -212,21 +217,22 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
     return result;
 }
 
-bool OsnmaMacVerifier::VerifyMacseq(const OsnmaMackMessage& mack,
+OsnmaMacVerifier::MacseqStatus
+OsnmaMacVerifier::VerifyMacseq(const OsnmaMackMessage& mack,
     const OsnmaTeslaChain& tesla_chain,
     OsnmaMacFunction mac_function)
 {
     if (!mack.valid_layout)
-        return false;
+        return MacseqStatus::InvalidFrameFormat;
 
     if (mack.prn <= 0 || mack.prn > 255)
-        return false;
+        return MacseqStatus::InvalidFrameFormat;
 
     const int32_t maclt =
         tesla_chain.GetMacLookupTable();
 
     if (maclt < 0)
-        return false;
+        return MacseqStatus::WaitingForKey;
 
     /*
         MACSEQ uses the next-subframe TESLA key. This is the same key selected
@@ -249,7 +255,7 @@ bool OsnmaMacVerifier::VerifyMacseq(const OsnmaMackMessage& mack,
         key,
         key_size_bytes))
     {
-        return false;
+        return MacseqStatus::WaitingForKey;
     }
 
     std::vector<std::uint8_t> macseq_input;
@@ -258,7 +264,7 @@ bool OsnmaMacVerifier::VerifyMacseq(const OsnmaMackMessage& mack,
         maclt,
         macseq_input))
     {
-        return false;
+        return MacseqStatus::InvalidFrameFormat;
     }
 
     std::array<std::uint8_t, OsnmaMackTagInfo::MAX_TAG_BYTES> computed{};
@@ -273,7 +279,7 @@ bool OsnmaMacVerifier::VerifyMacseq(const OsnmaMackMessage& mack,
             2);
 
     if (!computed_ok)
-        return false;
+        return MacseqStatus::UnsupportedMessage;
 
     /*
         MACSEQ is the first 12 bits of the MAC output.
@@ -285,12 +291,12 @@ bool OsnmaMacVerifier::VerifyMacseq(const OsnmaMackMessage& mack,
         static_cast<std::uint8_t>((mack.macseq & 0x0F) << 4);
 
     if (computed[0] != expected0)
-        return false;
+        return MacseqStatus::MackVerificationFailed;
 
     if ((computed[1] & 0xF0u) != expected1_high)
-        return false;
+        return MacseqStatus::MackVerificationFailed;
 
-    return true;
+    return MacseqStatus::Ok;
 }
 
 bool OsnmaMacVerifier::BuildMacseqInput(const OsnmaMackMessage& mack,
@@ -380,6 +386,31 @@ void OsnmaMacVerifier::AppendGstSf32(const GnssTime& time,
     out.push_back(static_cast<std::uint8_t>((value >> 16) & 0xFFu));
     out.push_back(static_cast<std::uint8_t>((value >> 8) & 0xFFu));
     out.push_back(static_cast<std::uint8_t>(value & 0xFFu));
+}
+
+AuthReason
+OsnmaMacVerifier::ReasonFromMacseqStatus(MacseqStatus status)
+{
+    switch (status)
+    {
+    case MacseqStatus::Ok:
+        return AuthReason::None;
+
+    case MacseqStatus::WaitingForKey:
+        return AuthReason::WaitingForKey;
+
+    case MacseqStatus::InvalidFrameFormat:
+        return AuthReason::InvalidFrameFormat;
+
+    case MacseqStatus::UnsupportedMessage:
+        return AuthReason::UnsupportedMessage;
+
+    case MacseqStatus::MackVerificationFailed:
+        return AuthReason::MackVerificationFailed;
+
+    default:
+        return AuthReason::MackVerificationFailed;
+    }
 }
 
 bool OsnmaMacVerifier::ComputeMac(OsnmaMacFunction mac_function,

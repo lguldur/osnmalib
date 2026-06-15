@@ -19,8 +19,8 @@ public:
     void Reset();
 
     FeedResult FeedRawInavPage(int32_t prn,
-        const std::uint8_t* even_120b,
-        const std::uint8_t* odd_120b,
+        const std::uint8_t* even_128b,
+        const std::uint8_t* odd_128b,
         const GnssTime& page_time,
         NavSignalSource source,
         int32_t raw_source,

@@ -1,0 +1,35 @@
+#pragma once
+
+#include <array>
+#include <cstdint>
+
+class OsnmaSelfTest
+{
+public:
+    struct Result
+    {
+        bool passed = true;
+
+        int32_t test_count = 0;
+        int32_t failed_count = 0;
+
+        std::array<char, 256> first_failure{};
+    };
+
+public:
+    static Result RunAll();
+
+private:
+    static bool TestTag0Adkd0LengthAndHeader(Result& result);
+    static bool TestTagInfoAdkd0LengthAndCtr(Result& result);
+    static bool TestTagInfoAdkd4LengthAndCtr(Result& result);
+    static bool TestMissingCedDataFails(Result& result);
+    static bool TestMissingTimingDataFails(Result& result);
+
+    static void Fail(Result& result,
+        const char* message);
+
+    static bool Check(Result& result,
+        bool condition,
+        const char* message);
+};

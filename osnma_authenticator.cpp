@@ -15,8 +15,8 @@ bool OsnmaAuthenticator::IsValidPrn(int32_t prn) const
 }
 
 FeedResult OsnmaAuthenticator::FeedRawInavPage(int32_t prn,
-    const std::uint8_t* even_120b,
-    const std::uint8_t* odd_120b,
+    const std::uint8_t* even_128b,
+    const std::uint8_t* odd_128b,
     const GnssTime& page_time,
     NavSignalSource source,
     int32_t raw_source,
@@ -29,8 +29,8 @@ FeedResult OsnmaAuthenticator::FeedRawInavPage(int32_t prn,
     page.crc_ok = crc_ok;
     page.source = source;
     page.native_source_code = raw_source;
-    page.even = even_120b;
-    page.odd = odd_120b;
+    page.even = even_128b;
+    page.odd = odd_128b;
 
     return FeedPageParts(page);
 }
