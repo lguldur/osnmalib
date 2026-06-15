@@ -6,6 +6,7 @@
 #include "galileo_nav_candidate.h"
 #include "osnma_crypto.h"
 #include "osnma_mac_input.h"
+#include "osnma_mac_verifier.h"
 #include "osnma_mack.h"
 #include "osnma_tesla_chain.h"
 
@@ -54,6 +55,41 @@ namespace
         out[3] = static_cast<std::uint8_t>((v >> 16) & 0xFFu);
         out[4] = static_cast<std::uint8_t>((v >> 8) & 0xFFu);
         out[5] = static_cast<std::uint8_t>(v & 0xFFu);
+    }
+
+    static void SetBitsMsb0(std::uint8_t* data,
+        int32_t first_bit,
+        int32_t bit_count,
+        std::uint32_t value)
+    {
+        if (data == nullptr || bit_count <= 0 || bit_count > 32)
+            return;
+
+        for (int32_t i = 0; i < bit_count; ++i)
+        {
+            const int32_t src_shift =
+                bit_count - 1 - i;
+
+            const bool bit =
+                ((value >> src_shift) & 0x01u) != 0;
+
+            const int32_t bit_index =
+                first_bit + i;
+
+            const int32_t byte_index =
+                bit_index / 8;
+
+            const int32_t bit_in_byte =
+                bit_index % 8;
+
+            const std::uint8_t mask =
+                static_cast<std::uint8_t>(0x80u >> bit_in_byte);
+
+            if (bit)
+                data[byte_index] |= mask;
+            else
+                data[byte_index] &= static_cast<std::uint8_t>(~mask);
+        }
     }
 
     static void FillWord(GalileoNavCandidate& candidate,
@@ -334,7 +370,7 @@ namespace
 
         kroot.key_size_bits = 128;
         kroot.tag_size_bits = 40;
-        kroot.mac_lookup_table = 33;
+        kroot.mac_lookup_table = 34;
 
         kroot.kroot_wn = wn;
         kroot.kroot_towh = kroot_towh;
@@ -367,6 +403,129 @@ namespace
 
         return true;
     }
+
+    static bool BuildMacseqTestChainAndMack(OsnmaTeslaChain& chain,
+        OsnmaMackMessage& tag_mack,
+        bool store_future_key,
+        bool wrong_macseq)
+    {
+        OsnmaDsmKroot kroot{};
+        OsnmaMackMessage disclosed_mack{};
+
+        if (!BuildSyntheticTeslaKrootSha256(kroot,
+            disclosed_mack,
+            false))
+        {
+            return false;
+        }
+
+        AuthReason reason = AuthReason::None;
+
+        if (!chain.InitializeFromKroot(kroot,
+            reason))
+        {
+            return false;
+        }
+
+        if (store_future_key)
+        {
+            if (!chain.VerifyAndStoreDisclosedKey(disclosed_mack,
+                reason))
+            {
+                return false;
+            }
+        }
+
+        /*
+            The MACK to verify is at root time, therefore its authentication
+            key is K1, disclosed one subframe later.
+        */
+        tag_mack = OsnmaMackMessage{};
+
+        tag_mack.valid_layout = true;
+        tag_mack.prn = 7;
+
+        tag_mack.subframe_epoch.wn = 2000;
+        tag_mack.subframe_epoch.tow = 35970.0;
+
+        tag_mack.key_size_bits = 128;
+        tag_mack.key_size_bytes = 16;
+
+        tag_mack.tag_size_bits = 40;
+        tag_mack.tag_size_bytes = 5;
+
+        tag_mack.total_tag_count = 6;
+        tag_mack.tag_info_count = 0;
+
+        tag_mack.cop = 1;
+
+        /*
+            MACLT 34, GST row 1 at TOW 35970:
+                slot 1 is FLX.
+
+            Give that FLX slot a raw 16-bit Tag-Info field:
+                PRND = 0x11
+                ADKD = 12
+                COP  = 1
+
+            BuildMacseqInput() must copy exactly these two bytes.
+        */
+        static constexpr int32_t TAG_SIZE_BITS = 40;
+        static constexpr int32_t TAG_AND_INFO_BITS = 56;
+        static constexpr int32_t FLX_TAG_NUMBER = 1;
+
+        const int32_t tag_info_start =
+            FLX_TAG_NUMBER * TAG_AND_INFO_BITS + TAG_SIZE_BITS;
+
+        SetBitsMsb0(tag_mack.raw.data(),
+            tag_info_start,
+            16,
+            0x11C1u);
+
+        /*
+            MACSEQ input:
+                PRNA || GST_SF || raw Tag-Info of FLX slots
+        */
+        std::vector<std::uint8_t> macseq_input;
+
+        macseq_input.push_back(static_cast<std::uint8_t>(tag_mack.prn));
+
+        std::uint8_t gst_bytes[4]{};
+        StoreGst32(tag_mack.subframe_epoch,
+            gst_bytes);
+
+        macseq_input.push_back(gst_bytes[0]);
+        macseq_input.push_back(gst_bytes[1]);
+        macseq_input.push_back(gst_bytes[2]);
+        macseq_input.push_back(gst_bytes[3]);
+
+        macseq_input.push_back(0x11u);
+        macseq_input.push_back(0xC1u);
+
+        std::uint8_t computed[2]{};
+
+        /*
+            The future key K1 is known from disclosed_mack.
+        */
+        if (!OsnmaHmacSha256(disclosed_mack.disclosed_key.data(),
+            disclosed_mack.key_size_bytes,
+            macseq_input.data(),
+            static_cast<int32_t>(macseq_input.size()),
+            computed,
+            2))
+        {
+            return false;
+        }
+
+        tag_mack.macseq =
+            (static_cast<int32_t>(computed[0]) << 4) |
+            static_cast<int32_t>((computed[1] >> 4) & 0x0Fu);
+
+        if (wrong_macseq)
+            tag_mack.macseq ^= 0x001;
+
+        return true;
+    }
 }
 
 OsnmaSelfTest::Result OsnmaSelfTest::RunAll()
@@ -380,6 +539,9 @@ OsnmaSelfTest::Result OsnmaSelfTest::RunAll()
     TestMissingTimingDataFails(result);
     TestTeslaSha256OneStepAcceptsValidKey(result);
     TestTeslaSha256OneStepRejectsWrongKey(result);
+    TestMacseqValidThenMissingNavData(result);
+    TestMacseqRejectsWrongMacseq(result);
+    TestMacseqWaitsForFutureKey(result);
 
     return result;
 }
@@ -405,11 +567,6 @@ bool OsnmaSelfTest::TestTag0Adkd0LengthAndHeader(Result& result)
     if (!Check(result, ok, "Tag0 ADKD0 message build failed"))
         return false;
 
-    /*
-        Tag0 / ADKD0:
-            8 + 8 + 32 + 8 + 2 + 549 = 607 bits
-            padded to 608 bits = 76 bytes
-    */
     if (!Check(result,
         msg.size() == 76,
         "Tag0 ADKD0 message size is not 76 bytes"))
@@ -437,9 +594,6 @@ bool OsnmaSelfTest::TestTagInfoAdkd0LengthAndCtr(Result& result)
     OsnmaMackMessage mack =
         MakeBaseMack();
 
-    /*
-        Tag-Info entry index 3 should use CTR = index + 1 = 4.
-    */
     const OsnmaMackTagInfo tag =
         MakeTagInfo(3,
             12,
@@ -485,9 +639,6 @@ bool OsnmaSelfTest::TestTagInfoAdkd4LengthAndCtr(Result& result)
     OsnmaMackMessage mack =
         MakeBaseMack();
 
-    /*
-        Tag-Info entry index 1 should use CTR = index + 1 = 2.
-    */
     const OsnmaMackTagInfo tag =
         MakeTagInfo(1,
             7,
@@ -506,11 +657,6 @@ bool OsnmaSelfTest::TestTagInfoAdkd4LengthAndCtr(Result& result)
     if (!Check(result, ok, "Tag-Info ADKD4 message build failed"))
         return false;
 
-    /*
-        ADKD4:
-            8 + 8 + 32 + 8 + 2 + 141 = 199 bits
-            padded to 200 bits = 25 bytes
-    */
     if (!Check(result,
         msg.size() == 25,
         "Tag-Info ADKD4 message size is not 25 bytes"))
@@ -677,6 +823,141 @@ bool OsnmaSelfTest::TestTeslaSha256OneStepRejectsWrongKey(Result& result)
     if (!Check(result,
         !chain.HasKey(1),
         "TESLA SHA256 wrong disclosed key was stored"))
+    {
+        return false;
+    }
+
+    return true;
+}
+
+bool OsnmaSelfTest::TestMacseqValidThenMissingNavData(Result& result)
+{
+    ++result.test_count;
+
+    OsnmaTeslaChain chain{};
+    OsnmaMackMessage mack{};
+
+    if (!Check(result,
+        BuildMacseqTestChainAndMack(chain,
+            mack,
+            true,
+            false),
+        "MACSEQ valid test-vector construction failed"))
+    {
+        return false;
+    }
+
+    GalileoNavCandidateStore nav_store{};
+    OsnmaMacVerifier verifier{};
+
+    const OsnmaMacVerifier::Result verify_result =
+        verifier.Verify(mack,
+            nav_store,
+            chain,
+            OsnmaMacFunction::HmacSha256,
+            0,
+            mack.subframe_epoch);
+
+    if (!Check(result,
+        verify_result.state == AuthState::Unknown,
+        "MACSEQ valid test unexpectedly authenticated without navdata"))
+    {
+        return false;
+    }
+
+    if (!Check(result,
+        verify_result.reason == AuthReason::MissingNavData,
+        "MACSEQ valid test did not reach MissingNavData"))
+    {
+        return false;
+    }
+
+    return true;
+}
+
+bool OsnmaSelfTest::TestMacseqRejectsWrongMacseq(Result& result)
+{
+    ++result.test_count;
+
+    OsnmaTeslaChain chain{};
+    OsnmaMackMessage mack{};
+
+    if (!Check(result,
+        BuildMacseqTestChainAndMack(chain,
+            mack,
+            true,
+            true),
+        "MACSEQ wrong test-vector construction failed"))
+    {
+        return false;
+    }
+
+    GalileoNavCandidateStore nav_store{};
+    OsnmaMacVerifier verifier{};
+
+    const OsnmaMacVerifier::Result verify_result =
+        verifier.Verify(mack,
+            nav_store,
+            chain,
+            OsnmaMacFunction::HmacSha256,
+            0,
+            mack.subframe_epoch);
+
+    if (!Check(result,
+        verify_result.state == AuthState::Unknown,
+        "MACSEQ wrong test unexpectedly authenticated"))
+    {
+        return false;
+    }
+
+    if (!Check(result,
+        verify_result.reason == AuthReason::MackVerificationFailed,
+        "MACSEQ wrong test did not fail with MackVerificationFailed"))
+    {
+        return false;
+    }
+
+    return true;
+}
+
+bool OsnmaSelfTest::TestMacseqWaitsForFutureKey(Result& result)
+{
+    ++result.test_count;
+
+    OsnmaTeslaChain chain{};
+    OsnmaMackMessage mack{};
+
+    if (!Check(result,
+        BuildMacseqTestChainAndMack(chain,
+            mack,
+            false,
+            false),
+        "MACSEQ waiting-key test-vector construction failed"))
+    {
+        return false;
+    }
+
+    GalileoNavCandidateStore nav_store{};
+    OsnmaMacVerifier verifier{};
+
+    const OsnmaMacVerifier::Result verify_result =
+        verifier.Verify(mack,
+            nav_store,
+            chain,
+            OsnmaMacFunction::HmacSha256,
+            0,
+            mack.subframe_epoch);
+
+    if (!Check(result,
+        verify_result.state == AuthState::Unknown,
+        "MACSEQ waiting-key test unexpectedly authenticated"))
+    {
+        return false;
+    }
+
+    if (!Check(result,
+        verify_result.reason == AuthReason::WaitingForKey,
+        "MACSEQ waiting-key test did not return WaitingForKey"))
     {
         return false;
     }

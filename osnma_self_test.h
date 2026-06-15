@@ -27,6 +27,9 @@ private:
     static bool TestMissingTimingDataFails(Result& result);
     static bool TestTeslaSha256OneStepAcceptsValidKey(Result& result);
     static bool TestTeslaSha256OneStepRejectsWrongKey(Result& result);
+    static bool TestMacseqValidThenMissingNavData(Result& result);
+    static bool TestMacseqRejectsWrongMacseq(Result& result);
+    static bool TestMacseqWaitsForFutureKey(Result& result);
 
     static void Fail(Result& result,
         const char* message);

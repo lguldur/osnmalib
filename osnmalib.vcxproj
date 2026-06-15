@@ -39,6 +39,7 @@
     <ClInclude Include="osnma_mac_verifier.h" />
     <ClInclude Include="osnma_merkle.h" />
     <ClInclude Include="osnma_page_parser.h" />
+    <ClInclude Include="osnma_raw_json_reader.h" />
     <ClInclude Include="osnma_self_test.h" />
     <ClInclude Include="osnma_subframe_assembler.h" />
     <ClInclude Include="osnma_tesla_chain.h" />
@@ -61,6 +62,7 @@
     <ClCompile Include="osnma_mac_verifier.cpp" />
     <ClCompile Include="osnma_merkle.cpp" />
     <ClCompile Include="osnma_page_parser.cpp" />
+    <ClCompile Include="osnma_raw_json_reader.cpp" />
     <ClCompile Include="osnma_self_test.cpp" />
     <ClCompile Include="osnma_subframe_assembler.cpp" />
     <ClCompile Include="osnma_tesla_chain.cpp" />
