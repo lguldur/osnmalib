@@ -146,21 +146,25 @@ bool OsnmaMacInputBuilder::BuildNavData_ADKD0(const GalileoNavCandidate& candida
         return false;
 
     /*
-        ADKD=0 / ADKD=12 authenticated navigation data.
+        ADKD=0 / ADKD=12 authenticated CED + status data.
 
-        Public receiver guidelines state that navigation data retrieval depends
-        on ADKD and refers to AD.2 for the exact definitions. Until the AD.2
-        masks are filled below, these ranges deliberately cover the full WT1..WT5
-        raw I/NAV payloads as a provisional placeholder.
+        Extracted ranges, MSB0 bit indexing:
+            WT1  [6, 126)  -> 120 bits
+            WT2  [6, 126)  -> 120 bits
+            WT3  [6, 128)  -> 122 bits
+            WT4  [6, 126)  -> 120 bits
+            WT5  [6, 73)   -> 67 bits
+
+        Total: 549 bits.
     */
 
     static constexpr std::array<NavDataRange, 5> ranges =
     {
-        NavDataRange{GAL_WT1, 0, GAL_INAV_BITS},
-        NavDataRange{GAL_WT2, 0, GAL_INAV_BITS},
-        NavDataRange{GAL_WT3, 0, GAL_INAV_BITS},
-        NavDataRange{GAL_WT4, 0, GAL_INAV_BITS},
-        NavDataRange{GAL_WT5, 0, GAL_INAV_BITS}
+        NavDataRange{GAL_WT1, 6, 120},
+        NavDataRange{GAL_WT2, 6, 120},
+        NavDataRange{GAL_WT3, 6, 122},
+        NavDataRange{GAL_WT4, 6, 120},
+        NavDataRange{GAL_WT5, 6, 67}
     };
 
     return AppendRanges(candidate,
@@ -178,17 +182,19 @@ bool OsnmaMacInputBuilder::BuildNavData_ADKD4(const GalileoNavCandidate& candida
         return false;
 
     /*
-        ADKD=4 authenticated navigation data.
+        ADKD=4 authenticated timing parameters.
 
-        Public documentation identifies ADKD=4 as timing-parameter
-        authentication. The exact WT6/WT10 bit masks still belong here once
-        imported from AD.2.
+        Extracted ranges, MSB0 bit indexing:
+            WT6   [6, 105)   -> 99 bits
+            WT10  [86, 128)  -> 42 bits
+
+        Total: 141 bits.
     */
 
     static constexpr std::array<NavDataRange, 2> ranges =
     {
-        NavDataRange{GAL_WT6, 0, GAL_INAV_BITS},
-        NavDataRange{GAL_WT10, 0, GAL_INAV_BITS}
+        NavDataRange{GAL_WT6, 6, 99},
+        NavDataRange{GAL_WT10, 86, 42}
     };
 
     return AppendRanges(candidate,
