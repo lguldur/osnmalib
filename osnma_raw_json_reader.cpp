@@ -64,15 +64,13 @@ bool OsnmaRawJsonReader::FeedFileToAuthenticator(const char* filename,
     Stats read_stats{};
     int32_t fed_count = 0;
 
-    std::array<std::uint8_t, OSNMA_WORD_BYTES> dummy_odd{};
-
     const bool ok =
         ReadFile(filename,
             [&](const Page& page) -> bool
             {
                 authenticator.FeedRawInavPage(page.prn,
-                    page.word_128b.data(),
-                    dummy_odd.data(),
+                    page.even_128b.data(),
+                    page.odd_128b.data(),
                     page.page_time,
                     source,
                     native_source_code,
@@ -226,10 +224,16 @@ bool OsnmaRawJsonReader::ParseLine(const std::string& line,
                             continue;
                         }
 
+                        const int32_t even_offset =
+                            raw_to_word_bit_offset;
+
+                        const int32_t odd_offset =
+                            120 + raw_to_word_bit_offset;
+
                         if (!CopyBitsMsb0Shifted(page.raw_240b.data(),
-                            raw_to_word_bit_offset,
+                            even_offset,
                             RAW_PAGE_BITS,
-                            page.word_128b.data(),
+                            page.even_128b.data(),
                             OSNMA_WORD_BITS))
                         {
                             ++stats.malformed_hex_count;
@@ -237,8 +241,22 @@ bool OsnmaRawJsonReader::ParseLine(const std::string& line,
                             continue;
                         }
 
+                        if (!CopyBitsMsb0Shifted(page.raw_240b.data(),
+                            odd_offset,
+                            RAW_PAGE_BITS,
+                            page.odd_128b.data(),
+                            OSNMA_WORD_BITS))
+                        {
+                            ++stats.malformed_hex_count;
+                            ++page_index;
+                            continue;
+                        }
+
+                        // Keep old debug field equal to even part for now.
+                        //page.word_128b = page.even_128b;
+
                         const int32_t wt =
-                            GetUnsignedBitsMsb0(page.word_128b.data(), 0, 6);
+                            GetUnsignedBitsMsb0(page.even_128b.data(), 0, 6);
 
                         if (wt >= 0 && wt < static_cast<int32_t>(stats.wt_count.size()))
                             ++stats.wt_count[wt];

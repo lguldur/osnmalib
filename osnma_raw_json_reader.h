@@ -35,7 +35,11 @@ public:
         GnssTime page_time{};
 
         std::array<std::uint8_t, RAW_PAGE_BYTES> raw_240b{};
-        std::array<std::uint8_t, OSNMA_WORD_BYTES> word_128b{};
+        std::array<std::uint8_t, OSNMA_WORD_BYTES> even_128b{};
+        std::array<std::uint8_t, OSNMA_WORD_BYTES> odd_128b{};
+
+        // Compatibility/debug alias candidate can be removed later.
+        //std::array<std::uint8_t, OSNMA_WORD_BYTES> word_128b{};
     };
 
     struct Stats

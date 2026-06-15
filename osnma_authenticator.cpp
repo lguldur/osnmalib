@@ -121,3 +121,8 @@ Status OsnmaAuthenticator::GetStatus(int32_t prn, const GnssTime& now) const
 
     return s;
 }
+
+const OsnmaEngine::Statistics& OsnmaAuthenticator::GetEngineStatistics() const
+{
+    return engine_.GetStatistics();
+}

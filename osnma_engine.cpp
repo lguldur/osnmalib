@@ -9,7 +9,15 @@ void OsnmaEngine::Reset()
 
     for (auto& p : pending_macks_)
         p = PendingMack{};
+
+    statistics_ = Statistics{};
 }
+
+const OsnmaEngine::Statistics& OsnmaEngine::GetStatistics() const
+{
+    return statistics_;
+}
+
 
 bool OsnmaEngine::SetMerkleRoot(const std::uint8_t* root_32_bytes)
 {
@@ -19,6 +27,8 @@ bool OsnmaEngine::SetMerkleRoot(const std::uint8_t* root_32_bytes)
 bool OsnmaEngine::FeedNavigationPage(const GalileoInavPageParts& page,
     AuthReason& reason_out)
 {
+    ++statistics_.navigation_pages_received;
+
     return nav_candidate_store_.FeedPage(page, reason_out);
 }
 
@@ -27,6 +37,8 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
     NavSignalSource source,
     int32_t raw_source)
 {
+    ++statistics_.subframes_processed;
+
     nav_candidate_store_.Cleanup(subframe.subframe_epoch);
     CleanupPendingMacks(subframe.subframe_epoch);
 
@@ -45,6 +57,14 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
         OsnmaDsmAssembler::ParseDsmHeader(
             static_cast<std::uint8_t>(subframe.hkroot[1]));
 
+    ++statistics_.dsm_blocks_received;
+
+    if (block.dsm_header.dsm_id >= 0 &&
+        block.dsm_header.dsm_id < static_cast<int32_t>(statistics_.dsm_id_count.size()))
+    {
+        ++statistics_.dsm_id_count[block.dsm_header.dsm_id];
+    }
+
     for (int32_t i = 0; i < OsnmaDsmBlock::SIZE_BYTES; ++i)
         block.data[i] = subframe.hkroot[i + 2];
 
@@ -55,6 +75,14 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
 
     if (complete)
     {
+        ++statistics_.dsm_messages_completed;
+
+        if (message.dsm_id >= 0 &&
+            message.dsm_id < static_cast<int32_t>(statistics_.dsm_completed_id_count.size()))
+        {
+            ++statistics_.dsm_completed_id_count[message.dsm_id];
+        }
+
         OsnmaDecodedDsm decoded{};
         AuthReason decode_reason = AuthReason::None;
 
@@ -65,53 +93,73 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
 
         if (!decoded_ok)
         {
+            ++statistics_.dsm_decode_failed;
+
             return MakePendingResult(subframe,
                 source,
                 raw_source,
                 decode_reason);
         }
 
+        ++statistics_.dsm_decode_ok;
+
         if (decoded.type == OsnmaDsmType::Pkr &&
             decoded.pkr.valid_layout)
         {
+            ++statistics_.pkr_received;
+
             const bool verified =
                 trust_store_.AddPkr(decoded.pkr,
                     subframe.subframe_epoch);
 
             if (!verified)
             {
+                ++statistics_.pkr_failed;
+
                 return MakePendingResult(subframe,
                     source,
                     raw_source,
                     AuthReason::MerkleVerificationFailed);
             }
+
+            ++statistics_.pkr_verified;
         }
 
         if (decoded.type == OsnmaDsmType::Kroot &&
             decoded.kroot.valid_layout)
         {
+            ++statistics_.kroot_received;
+
             const bool verified =
                 trust_store_.AddKroot(decoded.kroot,
                     subframe.subframe_epoch);
 
             if (!verified)
             {
+                ++statistics_.kroot_failed;
+
                 return MakePendingResult(subframe,
                     source,
                     raw_source,
                     AuthReason::SignatureVerificationFailed);
             }
 
+            ++statistics_.kroot_verified;
+
             AuthReason tesla_reason = AuthReason::None;
 
             if (!tesla_chain_.InitializeFromKroot(decoded.kroot,
                 tesla_reason))
             {
+                ++statistics_.tesla_init_failed;
+
                 return MakePendingResult(subframe,
                     source,
                     raw_source,
                     tesla_reason);
             }
+
+            ++statistics_.tesla_initialized;
         }
     }
 
@@ -120,6 +168,8 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
 
     if (trusted_kroot == nullptr)
     {
+        ++statistics_.subframes_waiting_for_kroot;
+
         return MakePendingResult(subframe,
             source,
             raw_source,
@@ -138,11 +188,15 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
 
     if (!mack_ok)
     {
+        ++statistics_.mack_parse_failed;
+
         return MakePendingResult(subframe,
             source,
             raw_source,
             mack_reason);
     }
+
+    ++statistics_.mack_parse_ok;
 
     /*
         Store this MACK for future verification.
@@ -164,18 +218,25 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
 
     if (!tesla_ok)
     {
+        ++statistics_.disclosed_keys_failed;
+
         return MakePendingResult(subframe,
             source,
             raw_source,
             tesla_reason);
     }
 
+    ++statistics_.disclosed_keys_verified;
+
     Result pending_result =
         VerifyPendingMacks(*trusted_kroot,
             subframe.subframe_epoch);
 
     if (pending_result.state == AuthState::Yes)
+    {
+        ++statistics_.auth_success;
         return pending_result;
+    }
 
     return MakePendingResult(subframe,
         source,
@@ -201,6 +262,8 @@ void OsnmaEngine::AddPendingMack(const OsnmaMackMessage& mack,
 
     if (slot < 0)
     {
+        ++statistics_.pending_macks_overwritten;
+
         slot = 0;
 
         for (int32_t i = 1; i < MAX_PENDING_MACKS; ++i)
@@ -222,6 +285,9 @@ void OsnmaEngine::AddPendingMack(const OsnmaMackMessage& mack,
     p.nmas = nmas;
     p.source = source;
     p.raw_source = raw_source;
+
+    ++statistics_.macks_added_pending;
+    UpdatePendingMackStatistics();
 }
 
 void OsnmaEngine::CleanupPendingMacks(const GnssTime& now)
@@ -239,6 +305,7 @@ void OsnmaEngine::CleanupPendingMacks(const GnssTime& now)
         if (!IsTimeValid(p.mack.subframe_epoch))
         {
             p = PendingMack{};
+            ++statistics_.pending_macks_cleaned;
             continue;
         }
 
@@ -246,8 +313,13 @@ void OsnmaEngine::CleanupPendingMacks(const GnssTime& now)
             DiffSeconds(now, p.mack.subframe_epoch);
 
         if (age_s < 0.0 || age_s > PENDING_MACK_LIFETIME_S)
+        {
             p = PendingMack{};
+            ++statistics_.pending_macks_cleaned;
+        }
     }
+
+    UpdatePendingMackStatistics();
 }
 
 void OsnmaEngine::RemovePendingMack(int32_t index)
@@ -256,6 +328,23 @@ void OsnmaEngine::RemovePendingMack(int32_t index)
         return;
 
     pending_macks_[index] = PendingMack{};
+    UpdatePendingMackStatistics();
+}
+
+void OsnmaEngine::UpdatePendingMackStatistics()
+{
+    int32_t count = 0;
+
+    for (const auto& pending : pending_macks_)
+    {
+        if (pending.valid)
+            ++count;
+    }
+
+    statistics_.pending_macks_current = count;
+
+    if (count > statistics_.pending_macks_max_seen)
+        statistics_.pending_macks_max_seen = count;
 }
 
 OsnmaEngine::Result
@@ -271,6 +360,8 @@ OsnmaEngine::VerifyPendingMacks(const OsnmaDsmKroot& trusted_kroot,
     bool saw_waiting_key = false;
     bool saw_missing_nav = false;
 
+    ++statistics_.pending_verification_runs;
+
     for (int32_t i = 0; i < MAX_PENDING_MACKS; ++i)
     {
         PendingMack& pending = pending_macks_[i];
@@ -279,6 +370,7 @@ OsnmaEngine::VerifyPendingMacks(const OsnmaDsmKroot& trusted_kroot,
             continue;
 
         saw_pending = true;
+        ++statistics_.pending_macks_checked;
 
         const OsnmaMacVerifier::Result mac_result =
             mac_verifier_.Verify(pending.mack,
@@ -290,6 +382,7 @@ OsnmaEngine::VerifyPendingMacks(const OsnmaDsmKroot& trusted_kroot,
 
         if (mac_result.state == AuthState::Yes)
         {
+            ++statistics_.pending_macks_verified_ok;
             RemovePendingMack(i);
 
             result.state = AuthState::Yes;
@@ -300,12 +393,14 @@ OsnmaEngine::VerifyPendingMacks(const OsnmaDsmKroot& trusted_kroot,
 
         if (mac_result.reason == AuthReason::WaitingForKey)
         {
+            ++statistics_.pending_waiting_for_key;
             saw_waiting_key = true;
             continue;
         }
 
         if (mac_result.reason == AuthReason::MissingNavData)
         {
+            ++statistics_.pending_missing_navdata;
             saw_missing_nav = true;
             continue;
         }
@@ -318,6 +413,7 @@ OsnmaEngine::VerifyPendingMacks(const OsnmaDsmKroot& trusted_kroot,
             mac_result.reason == AuthReason::UnsupportedMessage ||
             mac_result.reason == AuthReason::InvalidFrameFormat)
         {
+            ++statistics_.pending_macks_terminal_failed;
             RemovePendingMack(i);
             result.reason = mac_result.reason;
         }

@@ -30,6 +30,8 @@ public:
 
     Status GetStatus(int32_t prn, const GnssTime& now) const;
 
+    const OsnmaEngine::Statistics& GetEngineStatistics() const;
+
 private:
     struct SatRecord
     {
