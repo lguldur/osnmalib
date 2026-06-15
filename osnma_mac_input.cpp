@@ -69,6 +69,41 @@ int32_t OsnmaMacInputBuilder::BitWriter::BitCount() const
     return bit_count_;
 }
 
+bool OsnmaMacInputBuilder::BuildTag0Message(const OsnmaMackMessage& mack,
+    const GalileoNavCandidate& candidate,
+    std::uint8_t nmas,
+    std::vector<std::uint8_t>& out)
+{
+    out.clear();
+
+    if (!mack.valid_layout)
+        return false;
+
+    if (mack.prn <= 0 || mack.prn > 255)
+        return false;
+
+    /*
+        Tag0 is always self-authenticated ADKD=0 CED/status.
+
+        PRND = PRNA = authenticating satellite
+        CTR  = 1
+        ADKD = 0
+    */
+
+    const std::uint8_t prna =
+        static_cast<std::uint8_t>(mack.prn);
+
+    return BuildCommonMessage(prna,
+        prna,
+        GstSf32(mack.subframe_epoch),
+        1,
+        nmas,
+        OsnmaAdkd::InavCed,
+        false,
+        candidate,
+        out);
+}
+
 bool OsnmaMacInputBuilder::BuildTagMessage(const OsnmaMackMessage& mack,
     const OsnmaMackTagInfo& tag,
     const GalileoNavCandidate& candidate,
@@ -86,6 +121,54 @@ bool OsnmaMacInputBuilder::BuildTagMessage(const OsnmaMackMessage& mack,
     if (mack.prn <= 0 || mack.prn > 255)
         return false;
 
+    if (tag.index < 0)
+        return false;
+
+    /*
+        For Tag-Info entries:
+            CTR = tag index + 1
+
+        This matches Tag0 CTR=1 and Tag-Info entries following it.
+    */
+
+    const std::uint8_t prnd =
+        static_cast<std::uint8_t>(tag.prnd);
+
+    const std::uint8_t prna =
+        static_cast<std::uint8_t>(mack.prn);
+
+    const std::uint8_t ctr =
+        static_cast<std::uint8_t>(tag.index + 1);
+
+    const bool dummy_tag =
+        (tag.cop == 0);
+
+    return BuildCommonMessage(prnd,
+        prna,
+        GstSf32(mack.subframe_epoch),
+        ctr,
+        nmas,
+        tag.adkd,
+        dummy_tag,
+        candidate,
+        out);
+}
+
+bool OsnmaMacInputBuilder::BuildCommonMessage(std::uint8_t prnd,
+    std::uint8_t prna,
+    std::uint32_t gst_sf,
+    std::uint8_t ctr,
+    std::uint8_t nmas,
+    OsnmaAdkd adkd,
+    bool dummy_tag,
+    const GalileoNavCandidate& candidate,
+    std::vector<std::uint8_t>& out)
+{
+    out.clear();
+
+    if (prnd == 0 || prna == 0)
+        return false;
+
     BitWriter writer{};
 
     /*
@@ -99,16 +182,14 @@ bool OsnmaMacInputBuilder::BuildTagMessage(const OsnmaMackMessage& mack,
         P      = zero-padding to whole bytes
     */
 
-    writer.AppendBits(static_cast<std::uint32_t>(tag.prnd), 8);
-    writer.AppendBits(static_cast<std::uint32_t>(mack.prn), 8);
-    writer.AppendBits(GstSf32(mack.subframe_epoch), 32);
-    writer.AppendBits(static_cast<std::uint32_t>(tag.index), 8);
+    writer.AppendBits(static_cast<std::uint32_t>(prnd), 8);
+    writer.AppendBits(static_cast<std::uint32_t>(prna), 8);
+    writer.AppendBits(gst_sf, 32);
+    writer.AppendBits(static_cast<std::uint32_t>(ctr), 8);
     writer.AppendBits(static_cast<std::uint32_t>(nmas & 0x03u), 2);
 
-    const bool dummy_tag = (tag.cop == 0);
-
     if (!BuildNavData(candidate,
-        tag.adkd,
+        adkd,
         dummy_tag,
         writer))
     {

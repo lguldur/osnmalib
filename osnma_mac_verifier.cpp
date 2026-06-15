@@ -27,6 +27,88 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
     bool saw_key = false;
     bool saw_mac_input = false;
 
+    /*
+        First verify Tag0.
+
+        Tag0 authenticates ADKD=0 CED/status for the transmitting satellite:
+            PRND = PRNA = mack.prn
+            CTR  = 1
+    */
+    {
+        const GalileoNavCandidate* tag0_candidate =
+            nav_store.FindForAdkd(mack.prn,
+                OsnmaAdkd::InavCed,
+                now);
+
+        if (tag0_candidate != nullptr)
+        {
+            saw_candidate = true;
+
+            const std::uint8_t* key = nullptr;
+            int32_t key_size_bytes = 0;
+
+            /*
+                Tag0 uses the same key selection rule as normal ADKD=0 self
+                tags. We create a local tag descriptor for key selection only.
+            */
+            OsnmaMackTagInfo tag0_info{};
+            tag0_info.index = 0;
+            tag0_info.prnd = mack.prn;
+            tag0_info.adkd = OsnmaAdkd::InavCed;
+            tag0_info.cop = mack.cop;
+            tag0_info.tag_size_bits = mack.tag_size_bits;
+            tag0_info.tag_size_bytes = mack.tag_size_bytes;
+            tag0_info.valid_info = true;
+
+            if (tesla_chain.GetKeyForTag(mack,
+                tag0_info,
+                key,
+                key_size_bytes))
+            {
+                saw_key = true;
+
+                std::vector<std::uint8_t> mac_input;
+
+                if (OsnmaMacInputBuilder::BuildTag0Message(mack,
+                    *tag0_candidate,
+                    nmas,
+                    mac_input))
+                {
+                    saw_mac_input = true;
+
+                    std::array<std::uint8_t, OsnmaMackTagInfo::MAX_TAG_BYTES> computed{};
+
+                    const bool computed_ok =
+                        ComputeMac(mac_function,
+                            key,
+                            key_size_bytes,
+                            mac_input.data(),
+                            static_cast<int32_t>(mac_input.size()),
+                            computed.data(),
+                            mack.tag_size_bytes);
+
+                    if (!computed_ok)
+                    {
+                        result.reason = AuthReason::UnsupportedMessage;
+                        return result;
+                    }
+
+                    if (ConstantTimeEqual(computed.data(),
+                        mack.tag0.data(),
+                        mack.tag_size_bytes))
+                    {
+                        result.state = AuthState::Yes;
+                        result.reason = AuthReason::None;
+                        return result;
+                    }
+                }
+            }
+        }
+    }
+
+    /*
+        Then verify Tag-Info entries.
+    */
     for (int32_t i = 0; i < mack.tag_info_count; ++i)
     {
         const OsnmaMackTagInfo& tag = mack.tag_info[i];

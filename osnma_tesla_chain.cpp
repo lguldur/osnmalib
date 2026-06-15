@@ -5,6 +5,9 @@
 #include "osnma_crypto.h"
 #include "osnma_mac_lookup.h"
 
+static constexpr double GAL_WEEK_SECONDS = 604800.0;
+static constexpr double TESLA_STEP_S = 30.0;
+
 void OsnmaTeslaChain::Reset()
 {
     initialized_ = false;
@@ -15,7 +18,7 @@ void OsnmaTeslaChain::Reset()
     key_size_bytes_ = 0;
 
     root_wn_ = -1;
-    root_towh_ = -1;
+    root_tow_s_ = -1.0;
 
     mac_lookup_table_ = -1;
 
@@ -26,7 +29,7 @@ void OsnmaTeslaChain::Reset()
 }
 
 bool OsnmaTeslaChain::InitializeFromKroot(const OsnmaDsmKroot& kroot,
-                                          AuthReason& reason_out)
+    AuthReason& reason_out)
 {
     Reset();
 
@@ -84,8 +87,24 @@ bool OsnmaTeslaChain::InitializeFromKroot(const OsnmaDsmKroot& kroot,
     key_size_bits_ = kroot.key_size_bits;
     key_size_bytes_ = key_size_bytes;
 
+    /*
+        The KROOT GST points to the following subframe boundary. The root key
+        itself corresponds to KROOT GST - 30 seconds.
+    */
     root_wn_ = kroot.kroot_wn;
-    root_towh_ = kroot.kroot_towh;
+    root_tow_s_ = static_cast<double>(kroot.kroot_towh) * 3600.0 - TESLA_STEP_S;
+
+    while (root_tow_s_ < 0.0)
+    {
+        --root_wn_;
+        root_tow_s_ += GAL_WEEK_SECONDS;
+    }
+
+    while (root_tow_s_ >= GAL_WEEK_SECONDS)
+    {
+        ++root_wn_;
+        root_tow_s_ -= GAL_WEEK_SECONDS;
+    }
 
     mac_lookup_table_ = kroot.mac_lookup_table;
 
@@ -95,12 +114,12 @@ bool OsnmaTeslaChain::InitializeFromKroot(const OsnmaDsmKroot& kroot,
 
     GnssTime root_time{};
     root_time.wn = root_wn_;
-    root_time.tow = static_cast<double>(root_towh_) * 3600.0;
+    root_time.tow = root_tow_s_;
 
     return StoreVerifiedKey(0,
-                            root_time,
-                            kroot.kroot.data(),
-                            kroot.kroot_size_bytes);
+        root_time,
+        kroot.kroot.data(),
+        kroot.kroot_size_bytes);
 }
 
 bool OsnmaTeslaChain::IsInitialized() const
@@ -109,7 +128,7 @@ bool OsnmaTeslaChain::IsInitialized() const
 }
 
 bool OsnmaTeslaChain::VerifyAndStoreDisclosedKey(const OsnmaMackMessage& mack,
-                                                 AuthReason& reason_out)
+    AuthReason& reason_out)
 {
     reason_out = AuthReason::None;
 
@@ -153,8 +172,8 @@ bool OsnmaTeslaChain::VerifyAndStoreDisclosedKey(const OsnmaMackMessage& mack,
         const KeyEntry& existing = keys_[existing_slot];
 
         if (ConstantTimeEqual(existing.key.data(),
-                              mack.disclosed_key.data(),
-                              key_size_bytes_))
+            mack.disclosed_key.data(),
+            key_size_bytes_))
         {
             reason_out = AuthReason::None;
             return true;
@@ -166,8 +185,8 @@ bool OsnmaTeslaChain::VerifyAndStoreDisclosedKey(const OsnmaMackMessage& mack,
 
     const bool verified =
         VerifyAgainstKnownKey(key_index,
-                              mack.disclosed_key.data(),
-                              key_size_bytes_);
+            mack.disclosed_key.data(),
+            key_size_bytes_);
 
     if (!verified)
     {
@@ -175,11 +194,14 @@ bool OsnmaTeslaChain::VerifyAndStoreDisclosedKey(const OsnmaMackMessage& mack,
         return false;
     }
 
+    const GnssTime key_time =
+        ComputeTimeForIndex(key_index);
+
     const bool stored =
         StoreVerifiedKey(key_index,
-                         mack.subframe_epoch,
-                         mack.disclosed_key.data(),
-                         key_size_bytes_);
+            key_time,
+            mack.disclosed_key.data(),
+            key_size_bytes_);
 
     if (!stored)
     {
@@ -192,9 +214,9 @@ bool OsnmaTeslaChain::VerifyAndStoreDisclosedKey(const OsnmaMackMessage& mack,
 }
 
 bool OsnmaTeslaChain::GetKeyForTag(const OsnmaMackMessage& mack,
-                                   const OsnmaMackTagInfo& tag,
-                                   const std::uint8_t*& key,
-                                   int32_t& key_size_bytes) const
+    const OsnmaMackTagInfo& tag,
+    const std::uint8_t*& key,
+    int32_t& key_size_bytes) const
 {
     key = nullptr;
     key_size_bytes = 0;
@@ -286,25 +308,50 @@ int32_t OsnmaTeslaChain::ComputeDisclosureIndex(const GnssTime& time) const
 
     GnssTime root_time{};
     root_time.wn = root_wn_;
-    root_time.tow = static_cast<double>(root_towh_) * 3600.0;
+    root_time.tow = root_tow_s_;
 
     const double dt_s = DiffSeconds(time, root_time);
 
     if (dt_s < 0.0)
         return -1;
 
-    static constexpr double TESLA_STEP_S = 30.0;
-
     return static_cast<int32_t>(dt_s / TESLA_STEP_S);
 }
 
-int32_t OsnmaTeslaChain::ComputeKeyIndexForTag(const OsnmaMackMessage& mack,
-                                               const OsnmaMackTagInfo& tag) const
+GnssTime OsnmaTeslaChain::ComputeTimeForIndex(int32_t key_index) const
 {
-    const int32_t disclosure_index =
+    GnssTime time{};
+
+    time.wn = root_wn_;
+    time.tow = root_tow_s_;
+
+    if (key_index < 0)
+        return time;
+
+    time.tow += static_cast<double>(key_index) * TESLA_STEP_S;
+
+    while (time.tow >= GAL_WEEK_SECONDS)
+    {
+        ++time.wn;
+        time.tow -= GAL_WEEK_SECONDS;
+    }
+
+    while (time.tow < 0.0)
+    {
+        --time.wn;
+        time.tow += GAL_WEEK_SECONDS;
+    }
+
+    return time;
+}
+
+int32_t OsnmaTeslaChain::ComputeKeyIndexForTag(const OsnmaMackMessage& mack,
+    const OsnmaMackTagInfo& tag) const
+{
+    const int32_t tag_index =
         ComputeDisclosureIndex(mack.subframe_epoch);
 
-    if (disclosure_index < 0)
+    if (tag_index < 0)
         return -1;
 
     const int32_t delay_subframes =
@@ -313,11 +360,11 @@ int32_t OsnmaTeslaChain::ComputeKeyIndexForTag(const OsnmaMackMessage& mack,
     if (delay_subframes <= 0)
         return -1;
 
+    /*
+        The tag is transmitted first; the corresponding key is disclosed later.
+    */
     const int32_t target =
-        disclosure_index - delay_subframes;
-
-    if (target < 0)
-        return -1;
+        tag_index + delay_subframes;
 
     return target;
 }
@@ -342,9 +389,9 @@ int32_t OsnmaTeslaChain::GetKeyDelaySubframes(const OsnmaMackMessage& mack,
 }
 
 bool OsnmaTeslaChain::StoreVerifiedKey(int32_t key_index,
-                                       const GnssTime& time,
-                                       const std::uint8_t* key,
-                                       int32_t key_size_bytes)
+    const GnssTime& time,
+    const std::uint8_t* key,
+    int32_t key_size_bytes)
 {
     if (key == nullptr)
         return false;
@@ -362,8 +409,8 @@ bool OsnmaTeslaChain::StoreVerifiedKey(int32_t key_index,
         KeyEntry& existing = keys_[existing_slot];
 
         return ConstantTimeEqual(existing.key.data(),
-                                 key,
-                                 key_size_bytes);
+            key,
+            key_size_bytes);
     }
 
     int32_t slot = FindFreeSlot();
@@ -398,15 +445,15 @@ bool OsnmaTeslaChain::StoreVerifiedKey(int32_t key_index,
     entry.size_bytes = key_size_bytes;
 
     std::memcpy(entry.key.data(),
-                key,
-                static_cast<size_t>(key_size_bytes));
+        key,
+        static_cast<size_t>(key_size_bytes));
 
     return true;
 }
 
 bool OsnmaTeslaChain::VerifyAgainstKnownKey(int32_t candidate_index,
-                                            const std::uint8_t* candidate_key,
-                                            int32_t candidate_key_size_bytes) const
+    const std::uint8_t* candidate_key,
+    int32_t candidate_key_size_bytes) const
 {
     if (!initialized_)
         return false;
@@ -433,25 +480,26 @@ bool OsnmaTeslaChain::VerifyAgainstKnownKey(int32_t candidate_index,
 
         std::array<std::uint8_t, MAX_KEY_BYTES> current{};
         std::memcpy(current.data(),
-                    candidate_key,
-                    static_cast<size_t>(candidate_key_size_bytes));
+            candidate_key,
+            static_cast<size_t>(candidate_key_size_bytes));
 
         int32_t current_size = candidate_key_size_bytes;
 
         bool transform_ok = true;
 
         for (int32_t step = candidate_index;
-             step > known.index;
-             --step)
+            step > known.index;
+            --step)
         {
             std::array<std::uint8_t, MAX_KEY_BYTES> next{};
             int32_t next_size = 0;
 
             if (!TransformOneStep(current.data(),
-                                  current_size,
-                                  next.data(),
-                                  static_cast<int32_t>(next.size()),
-                                  next_size))
+                current_size,
+                step,
+                next.data(),
+                static_cast<int32_t>(next.size()),
+                next_size))
             {
                 transform_ok = false;
                 break;
@@ -468,8 +516,8 @@ bool OsnmaTeslaChain::VerifyAgainstKnownKey(int32_t candidate_index,
             continue;
 
         if (ConstantTimeEqual(current.data(),
-                              known.key.data(),
-                              known.size_bytes))
+            known.key.data(),
+            known.size_bytes))
         {
             return true;
         }
@@ -479,10 +527,11 @@ bool OsnmaTeslaChain::VerifyAgainstKnownKey(int32_t candidate_index,
 }
 
 bool OsnmaTeslaChain::TransformOneStep(const std::uint8_t* input_key,
-                                       int32_t input_key_size_bytes,
-                                       std::uint8_t* output_key,
-                                       int32_t output_key_capacity_bytes,
-                                       int32_t& output_key_size_bytes) const
+    int32_t input_key_size_bytes,
+    int32_t input_key_index,
+    std::uint8_t* output_key,
+    int32_t output_key_capacity_bytes,
+    int32_t& output_key_size_bytes) const
 {
     output_key_size_bytes = 0;
 
@@ -492,8 +541,41 @@ bool OsnmaTeslaChain::TransformOneStep(const std::uint8_t* input_key,
     if (input_key_size_bytes <= 0)
         return false;
 
+    if (input_key_index <= 0)
+        return false;
+
     if (output_key_capacity_bytes < key_size_bytes_)
         return false;
+
+    std::array<std::uint8_t, MAX_KEY_BYTES + 4 + 6> hash_input{};
+    int32_t hash_input_size = 0;
+
+    std::memcpy(hash_input.data(),
+        input_key,
+        static_cast<size_t>(input_key_size_bytes));
+
+    hash_input_size += input_key_size_bytes;
+
+    const GnssTime previous_time =
+        ComputeTimeForIndex(input_key_index - 1);
+
+    std::uint8_t gst_bytes[4]{};
+    StoreGst32(previous_time, gst_bytes);
+
+    std::memcpy(hash_input.data() + hash_input_size,
+        gst_bytes,
+        4);
+
+    hash_input_size += 4;
+
+    std::uint8_t alpha_bytes[6]{};
+    StoreAlpha48(alpha_, alpha_bytes);
+
+    std::memcpy(hash_input.data() + hash_input_size,
+        alpha_bytes,
+        6);
+
+    hash_input_size += 6;
 
     std::array<std::uint8_t, 64> digest{};
 
@@ -501,12 +583,15 @@ bool OsnmaTeslaChain::TransformOneStep(const std::uint8_t* input_key,
 
     if (hash_function_ == OsnmaHashFunction::Sha256)
     {
-        ok = OsnmaSha256(input_key,
-                         input_key_size_bytes,
-                         digest.data());
+        ok = OsnmaSha256(hash_input.data(),
+            hash_input_size,
+            digest.data());
     }
     else if (hash_function_ == OsnmaHashFunction::Sha3_256)
     {
+        /*
+            SHA3-256 is not wired in osnma_crypto yet.
+        */
         return false;
     }
     else
@@ -518,16 +603,48 @@ bool OsnmaTeslaChain::TransformOneStep(const std::uint8_t* input_key,
         return false;
 
     std::memcpy(output_key,
-                digest.data(),
-                static_cast<size_t>(key_size_bytes_));
+        digest.data(),
+        static_cast<size_t>(key_size_bytes_));
 
     output_key_size_bytes = key_size_bytes_;
     return true;
 }
 
+void OsnmaTeslaChain::StoreGst32(const GnssTime& time,
+    std::uint8_t out[4])
+{
+    const std::uint32_t wn =
+        static_cast<std::uint32_t>(time.wn) & 0x0FFFu;
+
+    const std::uint32_t tow =
+        static_cast<std::uint32_t>(time.tow) & 0x000FFFFFu;
+
+    const std::uint32_t value =
+        (wn << 20) | tow;
+
+    out[0] = static_cast<std::uint8_t>((value >> 24) & 0xFFu);
+    out[1] = static_cast<std::uint8_t>((value >> 16) & 0xFFu);
+    out[2] = static_cast<std::uint8_t>((value >> 8) & 0xFFu);
+    out[3] = static_cast<std::uint8_t>(value & 0xFFu);
+}
+
+void OsnmaTeslaChain::StoreAlpha48(std::uint64_t alpha,
+    std::uint8_t out[6])
+{
+    const std::uint64_t v =
+        alpha & 0x0000FFFFFFFFFFFFull;
+
+    out[0] = static_cast<std::uint8_t>((v >> 40) & 0xFFu);
+    out[1] = static_cast<std::uint8_t>((v >> 32) & 0xFFu);
+    out[2] = static_cast<std::uint8_t>((v >> 24) & 0xFFu);
+    out[3] = static_cast<std::uint8_t>((v >> 16) & 0xFFu);
+    out[4] = static_cast<std::uint8_t>((v >> 8) & 0xFFu);
+    out[5] = static_cast<std::uint8_t>(v & 0xFFu);
+}
+
 bool OsnmaTeslaChain::ConstantTimeEqual(const std::uint8_t* a,
-                                        const std::uint8_t* b,
-                                        int32_t size_bytes)
+    const std::uint8_t* b,
+    int32_t size_bytes)
 {
     if (a == nullptr || b == nullptr)
         return false;

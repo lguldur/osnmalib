@@ -43,10 +43,37 @@ public:
         int32_t raw_source);
 
 private:
+    static constexpr int32_t MAX_PENDING_MACKS = 64;
+    static constexpr double PENDING_MACK_LIFETIME_S = 900.0;
+
+    struct PendingMack
+    {
+        bool valid = false;
+
+        OsnmaMackMessage mack{};
+        std::uint8_t nmas = 0;
+
+        NavSignalSource source = NavSignalSource::Unknown;
+        int32_t raw_source = 0;
+    };
+
+private:
     Result MakePendingResult(const OsnmaSubframe& subframe,
         NavSignalSource source,
         int32_t raw_source,
         AuthReason reason) const;
+
+    void AddPendingMack(const OsnmaMackMessage& mack,
+        std::uint8_t nmas,
+        NavSignalSource source,
+        int32_t raw_source);
+
+    void CleanupPendingMacks(const GnssTime& now);
+
+    void RemovePendingMack(int32_t index);
+
+    Result VerifyPendingMacks(const OsnmaDsmKroot& trusted_kroot,
+        const GnssTime& now);
 
 private:
     OsnmaDsmAssembler dsm_assembler_{};
@@ -56,4 +83,6 @@ private:
     GalileoNavCandidateStore nav_candidate_store_{};
     OsnmaTeslaChain tesla_chain_{};
     OsnmaMacVerifier mac_verifier_{};
+
+    std::array<PendingMack, MAX_PENDING_MACKS> pending_macks_{};
 };

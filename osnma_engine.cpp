@@ -6,6 +6,9 @@ void OsnmaEngine::Reset()
     trust_store_.Reset();
     nav_candidate_store_.Reset();
     tesla_chain_.Reset();
+
+    for (auto& p : pending_macks_)
+        p = PendingMack{};
 }
 
 bool OsnmaEngine::SetMerkleRoot(const std::uint8_t* root_32_bytes)
@@ -25,6 +28,7 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
     int32_t raw_source)
 {
     nav_candidate_store_.Cleanup(subframe.subframe_epoch);
+    CleanupPendingMacks(subframe.subframe_epoch);
 
     OsnmaDsmBlock block{};
 
@@ -140,6 +144,18 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
             mack_reason);
     }
 
+    /*
+        Store this MACK for future verification.
+
+        The disclosed TESLA key in this MACK authenticates previous MACKs,
+        not this same MACK. Current MACK verification will happen when a
+        later disclosed key becomes available.
+    */
+    AddPendingMack(mack,
+        nmas,
+        source,
+        raw_source);
+
     AuthReason tesla_reason = AuthReason::None;
 
     const bool tesla_ok =
@@ -154,27 +170,173 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
             tesla_reason);
     }
 
-    const OsnmaMacVerifier::Result mac_result =
-        mac_verifier_.Verify(mack,
-            nav_candidate_store_,
-            tesla_chain_,
-            trusted_kroot->mac_function,
-            nmas,
+    Result pending_result =
+        VerifyPendingMacks(*trusted_kroot,
             subframe.subframe_epoch);
 
-    if (mac_result.state == AuthState::Yes)
-    {
-        Result result{};
-        result.state = AuthState::Yes;
-        result.reason = AuthReason::None;
-        result.auth_record_count = 0;
-        return result;
-    }
+    if (pending_result.state == AuthState::Yes)
+        return pending_result;
 
     return MakePendingResult(subframe,
         source,
         raw_source,
-        mac_result.reason);
+        pending_result.reason);
+}
+
+void OsnmaEngine::AddPendingMack(const OsnmaMackMessage& mack,
+    std::uint8_t nmas,
+    NavSignalSource source,
+    int32_t raw_source)
+{
+    int32_t slot = -1;
+
+    for (int32_t i = 0; i < MAX_PENDING_MACKS; ++i)
+    {
+        if (!pending_macks_[i].valid)
+        {
+            slot = i;
+            break;
+        }
+    }
+
+    if (slot < 0)
+    {
+        slot = 0;
+
+        for (int32_t i = 1; i < MAX_PENDING_MACKS; ++i)
+        {
+            const double dt =
+                DiffSeconds(pending_macks_[i].mack.subframe_epoch,
+                    pending_macks_[slot].mack.subframe_epoch);
+
+            if (dt < 0.0)
+                slot = i;
+        }
+    }
+
+    PendingMack& p = pending_macks_[slot];
+
+    p = PendingMack{};
+    p.valid = true;
+    p.mack = mack;
+    p.nmas = nmas;
+    p.source = source;
+    p.raw_source = raw_source;
+}
+
+void OsnmaEngine::CleanupPendingMacks(const GnssTime& now)
+{
+    if (!IsTimeValid(now))
+        return;
+
+    for (int32_t i = 0; i < MAX_PENDING_MACKS; ++i)
+    {
+        PendingMack& p = pending_macks_[i];
+
+        if (!p.valid)
+            continue;
+
+        if (!IsTimeValid(p.mack.subframe_epoch))
+        {
+            p = PendingMack{};
+            continue;
+        }
+
+        const double age_s =
+            DiffSeconds(now, p.mack.subframe_epoch);
+
+        if (age_s < 0.0 || age_s > PENDING_MACK_LIFETIME_S)
+            p = PendingMack{};
+    }
+}
+
+void OsnmaEngine::RemovePendingMack(int32_t index)
+{
+    if (index < 0 || index >= MAX_PENDING_MACKS)
+        return;
+
+    pending_macks_[index] = PendingMack{};
+}
+
+OsnmaEngine::Result
+OsnmaEngine::VerifyPendingMacks(const OsnmaDsmKroot& trusted_kroot,
+    const GnssTime& now)
+{
+    Result result{};
+    result.state = AuthState::Unknown;
+    result.reason = AuthReason::WaitingForKey;
+    result.auth_record_count = 0;
+
+    bool saw_pending = false;
+    bool saw_waiting_key = false;
+    bool saw_missing_nav = false;
+
+    for (int32_t i = 0; i < MAX_PENDING_MACKS; ++i)
+    {
+        PendingMack& pending = pending_macks_[i];
+
+        if (!pending.valid)
+            continue;
+
+        saw_pending = true;
+
+        const OsnmaMacVerifier::Result mac_result =
+            mac_verifier_.Verify(pending.mack,
+                nav_candidate_store_,
+                tesla_chain_,
+                trusted_kroot.mac_function,
+                pending.nmas,
+                pending.mack.subframe_epoch);
+
+        if (mac_result.state == AuthState::Yes)
+        {
+            RemovePendingMack(i);
+
+            result.state = AuthState::Yes;
+            result.reason = AuthReason::None;
+            result.auth_record_count = 0;
+            return result;
+        }
+
+        if (mac_result.reason == AuthReason::WaitingForKey)
+        {
+            saw_waiting_key = true;
+            continue;
+        }
+
+        if (mac_result.reason == AuthReason::MissingNavData)
+        {
+            saw_missing_nav = true;
+            continue;
+        }
+
+        /*
+            At this point the relevant key was available and the MAC path
+            reached a terminal failure for this pending MACK.
+        */
+        if (mac_result.reason == AuthReason::MackVerificationFailed ||
+            mac_result.reason == AuthReason::UnsupportedMessage ||
+            mac_result.reason == AuthReason::InvalidFrameFormat)
+        {
+            RemovePendingMack(i);
+            result.reason = mac_result.reason;
+        }
+    }
+
+    if (!saw_pending)
+    {
+        result.reason = AuthReason::WaitingForKey;
+    }
+    else if (saw_waiting_key)
+    {
+        result.reason = AuthReason::WaitingForKey;
+    }
+    else if (saw_missing_nav)
+    {
+        result.reason = AuthReason::MissingNavData;
+    }
+
+    return result;
 }
 
 OsnmaEngine::Result

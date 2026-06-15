@@ -10,6 +10,11 @@
 class OsnmaMacInputBuilder
 {
 public:
+    static bool BuildTag0Message(const OsnmaMackMessage& mack,
+        const GalileoNavCandidate& candidate,
+        std::uint8_t nmas,
+        std::vector<std::uint8_t>& out);
+
     static bool BuildTagMessage(const OsnmaMackMessage& mack,
         const OsnmaMackTagInfo& tag,
         const GalileoNavCandidate& candidate,
@@ -41,6 +46,16 @@ private:
     };
 
 private:
+    static bool BuildCommonMessage(std::uint8_t prnd,
+        std::uint8_t prna,
+        std::uint32_t gst_sf,
+        std::uint8_t ctr,
+        std::uint8_t nmas,
+        OsnmaAdkd adkd,
+        bool dummy_tag,
+        const GalileoNavCandidate& candidate,
+        std::vector<std::uint8_t>& out);
+
     static bool BuildNavData(const GalileoNavCandidate& candidate,
         OsnmaAdkd adkd,
         bool dummy_tag,
