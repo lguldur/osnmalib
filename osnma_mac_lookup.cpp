@@ -345,8 +345,26 @@ bool OsnmaMacLookupTable::FindEntry(int32_t maclt,
     }
 }
 
+int32_t OsnmaMacLookupTable::MessageIndexFromGst(const GnssTime& gst,
+    int32_t msg_count)
+{
+    if (!IsTimeValid(gst))
+        return -1;
+
+    if (msg_count <= 0)
+        return -1;
+
+    const int32_t half_minute =
+        static_cast<int32_t>(gst.tow / 30.0);
+
+    if (half_minute < 0)
+        return -1;
+
+    return half_minute % msg_count;
+}
+
 bool OsnmaMacLookupTable::GetExpectedSlot(int32_t maclt,
-    int32_t macseq,
+    const GnssTime& gst,
     int32_t tag_index,
     OsnmaMacLookupSlot& out)
 {
@@ -364,7 +382,10 @@ bool OsnmaMacLookupTable::GetExpectedSlot(int32_t maclt,
         return false;
 
     const int32_t message_index =
-        macseq % entry.msg_count;
+        MessageIndexFromGst(gst, entry.msg_count);
+
+    if (message_index < 0)
+        return false;
 
     out = entry.slots[message_index][tag_index];
 
@@ -372,13 +393,13 @@ bool OsnmaMacLookupTable::GetExpectedSlot(int32_t maclt,
 }
 
 bool OsnmaMacLookupTable::IsTagConsistent(int32_t maclt,
-    int32_t macseq,
+    const GnssTime& gst,
     int32_t prna,
     const OsnmaMackTagInfo& tag)
 {
     OsnmaMacLookupSlot expected{};
 
-    if (!GetExpectedSlot(maclt, macseq, tag.index, expected))
+    if (!GetExpectedSlot(maclt, gst, tag.index, expected))
         return false;
 
     if (IsFlexible(expected))
@@ -393,12 +414,12 @@ bool OsnmaMacLookupTable::IsTagConsistent(int32_t maclt,
 
 int32_t OsnmaMacLookupTable::GetNominalDelaySubframes(
     int32_t maclt,
-    int32_t macseq,
+    const GnssTime& gst,
     const OsnmaMackTagInfo& tag)
 {
     OsnmaMacLookupSlot expected{};
 
-    if (!GetExpectedSlot(maclt, macseq, tag.index, expected))
+    if (!GetExpectedSlot(maclt, gst, tag.index, expected))
         return -1;
 
     OsnmaAdkd effective_adkd = expected.adkd;

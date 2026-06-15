@@ -376,7 +376,7 @@ int32_t OsnmaTeslaChain::GetKeyDelaySubframes(const OsnmaMackMessage& mack,
         return -1;
 
     if (!OsnmaMacLookupTable::IsTagConsistent(mac_lookup_table_,
-        mack.macseq,
+        mack.subframe_epoch,
         mack.prn,
         tag))
     {
@@ -384,7 +384,7 @@ int32_t OsnmaTeslaChain::GetKeyDelaySubframes(const OsnmaMackMessage& mack,
     }
 
     return OsnmaMacLookupTable::GetNominalDelaySubframes(mac_lookup_table_,
-        mack.macseq,
+        mack.subframe_epoch,
         tag);
 }
 

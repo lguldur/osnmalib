@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 
+#include "gnss_time.h"
 #include "osnma_mack.h"
 #include "osnma_types.h"
 
@@ -30,17 +31,17 @@ public:
 
 public:
     static bool GetExpectedSlot(int32_t maclt,
-        int32_t macseq,
+        const GnssTime& gst,
         int32_t tag_index,
         OsnmaMacLookupSlot& out);
 
     static bool IsTagConsistent(int32_t maclt,
-        int32_t macseq,
+        const GnssTime& gst,
         int32_t prna,
         const OsnmaMackTagInfo& tag);
 
     static int32_t GetNominalDelaySubframes(int32_t maclt,
-        int32_t macseq,
+        const GnssTime& gst,
         const OsnmaMackTagInfo& tag);
 
 private:
@@ -55,6 +56,9 @@ private:
 
 private:
     static bool FindEntry(int32_t maclt, Entry& out);
+
+    static int32_t MessageIndexFromGst(const GnssTime& gst,
+        int32_t msg_count);
 
     static OsnmaMacLookupSlot Slot00S();
     static OsnmaMacLookupSlot Slot00E();
