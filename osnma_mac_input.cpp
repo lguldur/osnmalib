@@ -36,9 +36,7 @@ void OsnmaMacInputBuilder::BitWriter::AppendBytesMsb0(const std::uint8_t* data,
         return;
 
     for (int32_t i = 0; i < bit_count; ++i)
-    {
         AppendBits(GetBitMsb0(data, i) ? 1u : 0u, 1);
-    }
 }
 
 void OsnmaMacInputBuilder::BitWriter::AppendZeroBits(int32_t bit_count)
@@ -60,9 +58,15 @@ void OsnmaMacInputBuilder::BitWriter::PadToByte()
     AppendZeroBits(8 - rem);
 }
 
-const std::vector<std::uint8_t>& OsnmaMacInputBuilder::BitWriter::Bytes() const
+const std::vector<std::uint8_t>&
+OsnmaMacInputBuilder::BitWriter::Bytes() const
 {
     return bytes_;
+}
+
+int32_t OsnmaMacInputBuilder::BitWriter::BitCount() const
+{
+    return bit_count_;
 }
 
 bool OsnmaMacInputBuilder::BuildTagMessage(const OsnmaMackMessage& mack,
@@ -76,10 +80,10 @@ bool OsnmaMacInputBuilder::BuildTagMessage(const OsnmaMackMessage& mack,
     if (!mack.valid_layout || !tag.valid_info)
         return false;
 
-    if (tag.prnd < 0 || tag.prnd > 255)
+    if (tag.prnd <= 0 || tag.prnd > 255)
         return false;
 
-    if (mack.prn < 0 || mack.prn > 255)
+    if (mack.prn <= 0 || mack.prn > 255)
         return false;
 
     BitWriter writer{};
@@ -97,7 +101,7 @@ bool OsnmaMacInputBuilder::BuildTagMessage(const OsnmaMackMessage& mack,
 
     writer.AppendBits(static_cast<std::uint32_t>(tag.prnd), 8);
     writer.AppendBits(static_cast<std::uint32_t>(mack.prn), 8);
-    writer.AppendBits(GstSfTow32(mack.subframe_epoch), 32);
+    writer.AppendBits(GstSf32(mack.subframe_epoch), 32);
     writer.AppendBits(static_cast<std::uint32_t>(tag.index), 8);
     writer.AppendBits(static_cast<std::uint32_t>(nmas & 0x03u), 2);
 
@@ -142,33 +146,28 @@ bool OsnmaMacInputBuilder::BuildNavData_ADKD0(const GalileoNavCandidate& candida
         return false;
 
     /*
-        PROVISIONAL NAVDATA:
-        ADKD=0/12 uses selected bits from WT1..WT5.
-        The exact extraction masks are not in the SIS ICD text; SIS ICD points
-        to AD.2 for masks. Until those masks are added, we append full raw
-        120-bit pages as a stable placeholder.
+        ADKD=0 / ADKD=12 authenticated navigation data.
+
+        Public receiver guidelines state that navigation data retrieval depends
+        on ADKD and refers to AD.2 for the exact definitions. Until the AD.2
+        masks are filled below, these ranges deliberately cover the full WT1..WT5
+        raw I/NAV payloads as a provisional placeholder.
     */
 
-    static constexpr int32_t RAW_WT_BITS = GAL_INAV_BITS;
-    static constexpr int32_t PROVISIONAL_ADKD0_BITS = RAW_WT_BITS * 5;
-
-    if (dummy_tag)
+    static constexpr std::array<NavDataRange, 5> ranges =
     {
-        writer.AppendZeroBits(PROVISIONAL_ADKD0_BITS);
-        return true;
-    }
+        NavDataRange{GAL_WT1, 0, GAL_INAV_BITS},
+        NavDataRange{GAL_WT2, 0, GAL_INAV_BITS},
+        NavDataRange{GAL_WT3, 0, GAL_INAV_BITS},
+        NavDataRange{GAL_WT4, 0, GAL_INAV_BITS},
+        NavDataRange{GAL_WT5, 0, GAL_INAV_BITS}
+    };
 
-    for (int32_t wt = GAL_WT1; wt <= GAL_WT5; ++wt)
-    {
-        const GalileoNavWord& word = candidate.words[wt];
-
-        if (!word.valid)
-            return false;
-
-        AppendRawWord(word, writer);
-    }
-
-    return true;
+    return AppendRanges(candidate,
+        ranges.data(),
+        static_cast<int32_t>(ranges.size()),
+        dummy_tag,
+        writer);
 }
 
 bool OsnmaMacInputBuilder::BuildNavData_ADKD4(const GalileoNavCandidate& candidate,
@@ -179,35 +178,90 @@ bool OsnmaMacInputBuilder::BuildNavData_ADKD4(const GalileoNavCandidate& candida
         return false;
 
     /*
-        PROVISIONAL NAVDATA:
-        ADKD=4 uses selected bits from WT6 and WT10.
-        The exact extraction masks are not in the SIS ICD text; SIS ICD points
-        to AD.2 for masks. Until those masks are added, we append full raw
-        WT6 + WT10 120-bit pages as a stable placeholder.
+        ADKD=4 authenticated navigation data.
+
+        Public documentation identifies ADKD=4 as timing-parameter
+        authentication. The exact WT6/WT10 bit masks still belong here once
+        imported from AD.2.
     */
 
-    static constexpr int32_t RAW_WT_BITS = GAL_INAV_BITS;
-    static constexpr int32_t PROVISIONAL_ADKD4_BITS = RAW_WT_BITS * 2;
-
-    if (dummy_tag)
+    static constexpr std::array<NavDataRange, 2> ranges =
     {
-        writer.AppendZeroBits(PROVISIONAL_ADKD4_BITS);
-        return true;
-    }
+        NavDataRange{GAL_WT6, 0, GAL_INAV_BITS},
+        NavDataRange{GAL_WT10, 0, GAL_INAV_BITS}
+    };
 
-    AppendRawWord(candidate.words[GAL_WT6], writer);
-    AppendRawWord(candidate.words[GAL_WT10], writer);
+    return AppendRanges(candidate,
+        ranges.data(),
+        static_cast<int32_t>(ranges.size()),
+        dummy_tag,
+        writer);
+}
+
+bool OsnmaMacInputBuilder::AppendRanges(const GalileoNavCandidate& candidate,
+    const NavDataRange* ranges,
+    int32_t range_count,
+    bool dummy_tag,
+    BitWriter& writer)
+{
+    if (ranges == nullptr || range_count <= 0)
+        return false;
+
+    for (int32_t i = 0; i < range_count; ++i)
+    {
+        if (!AppendRange(candidate,
+            ranges[i],
+            dummy_tag,
+            writer))
+        {
+            return false;
+        }
+    }
 
     return true;
 }
 
-void OsnmaMacInputBuilder::AppendRawWord(const GalileoNavWord& word,
+bool OsnmaMacInputBuilder::AppendRange(const GalileoNavCandidate& candidate,
+    const NavDataRange& range,
+    bool dummy_tag,
     BitWriter& writer)
 {
-    writer.AppendBytesMsb0(word.even.data(), GAL_INAV_BITS);
+    if (range.wt < 0 || range.wt > GAL_MAX_WT)
+        return false;
+
+    if (range.first_bit < 0 || range.bit_count <= 0)
+        return false;
+
+    if ((range.first_bit + range.bit_count) > GAL_INAV_BITS)
+        return false;
+
+    if (!candidate.HasWord(range.wt))
+        return false;
+
+    const GalileoNavWord& word =
+        candidate.words[range.wt];
+
+    if (!word.valid)
+        return false;
+
+    if (dummy_tag)
+    {
+        writer.AppendZeroBits(range.bit_count);
+        return true;
+    }
+
+    for (int32_t i = 0; i < range.bit_count; ++i)
+    {
+        const bool bit =
+            GetBitMsb0(word.even.data(), range.first_bit + i);
+
+        writer.AppendBits(bit ? 1u : 0u, 1);
+    }
+
+    return true;
 }
 
-std::uint32_t OsnmaMacInputBuilder::GstSfTow32(const GnssTime& time)
+std::uint32_t OsnmaMacInputBuilder::GstSf32(const GnssTime& time)
 {
     if (!IsTimeValid(time))
         return 0;
