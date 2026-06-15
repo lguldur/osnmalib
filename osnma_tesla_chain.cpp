@@ -330,6 +330,7 @@ int32_t OsnmaTeslaChain::GetKeyDelaySubframes(const OsnmaMackMessage& mack,
 
     if (!OsnmaMacLookupTable::IsTagConsistent(mac_lookup_table_,
         mack.macseq,
+        mack.prn,
         tag))
     {
         return -1;

@@ -209,8 +209,14 @@ void OsnmaMacInputBuilder::AppendRawWord(const GalileoNavWord& word,
 
 std::uint32_t OsnmaMacInputBuilder::GstSfTow32(const GnssTime& time)
 {
-    if (time.tow <= 0.0)
+    if (!IsTimeValid(time))
         return 0;
 
-    return static_cast<std::uint32_t>(time.tow);
+    const std::uint32_t wn =
+        static_cast<std::uint32_t>(time.wn) & 0x0FFFu;
+
+    const std::uint32_t tow =
+        static_cast<std::uint32_t>(time.tow) & 0x000FFFFFu;
+
+    return (wn << 20) | tow;
 }

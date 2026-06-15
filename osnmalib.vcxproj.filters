@@ -24,6 +24,7 @@
     <ClInclude Include="osnma_mac_input.h" />
     <ClInclude Include="osnma_mac_verifier.h" />
     <ClInclude Include="osnma_tesla_chain.h" />
+    <ClInclude Include="osnma_mac_lookup.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="osnma_authenticator.cpp" />
@@ -43,5 +44,6 @@
     <ClCompile Include="osnma_mac_input.cpp" />
     <ClCompile Include="osnma_mac_verifier.cpp" />
     <ClCompile Include="osnma_tesla_chain.cpp" />
+    <ClCompile Include="osnma_mac_lookup.cpp" />
   </ItemGroup>
 </Project>

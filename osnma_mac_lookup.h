@@ -36,6 +36,7 @@ public:
 
     static bool IsTagConsistent(int32_t maclt,
         int32_t macseq,
+        int32_t prna,
         const OsnmaMackTagInfo& tag);
 
     static int32_t GetNominalDelaySubframes(int32_t maclt,
@@ -63,6 +64,8 @@ private:
     static OsnmaMacLookupSlot SlotFLX();
 
     static bool IsFlexible(const OsnmaMacLookupSlot& slot);
-
     static bool SameAdkd(OsnmaAdkd a, OsnmaAdkd b);
+    static bool IsTargetConsistent(const OsnmaMacLookupSlot& expected,
+        int32_t prna,
+        int32_t prnd);
 };

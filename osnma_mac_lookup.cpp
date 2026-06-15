@@ -65,6 +65,31 @@ bool OsnmaMacLookupTable::SameAdkd(OsnmaAdkd a, OsnmaAdkd b)
     return a == b;
 }
 
+bool OsnmaMacLookupTable::IsTargetConsistent(const OsnmaMacLookupSlot& expected,
+    int32_t prna,
+    int32_t prnd)
+{
+    if (!expected.valid)
+        return false;
+
+    if (prna <= 0 || prna > 255)
+        return false;
+
+    if (prnd <= 0 || prnd > 255)
+        return false;
+
+    if (expected.target == OsnmaMacTagAuthTarget::Flexible)
+        return true;
+
+    if (expected.target == OsnmaMacTagAuthTarget::Self)
+        return prnd == prna;
+
+    if (expected.target == OsnmaMacTagAuthTarget::External)
+        return prnd != prna;
+
+    return false;
+}
+
 bool OsnmaMacLookupTable::FindEntry(int32_t maclt,
     Entry& out)
 {
@@ -338,10 +363,6 @@ bool OsnmaMacLookupTable::GetExpectedSlot(int32_t maclt,
     if (tag_index < 0 || tag_index >= entry.tag_count)
         return false;
 
-    /*
-        MACSEQ selects which message sequence is used. The current code maps
-        the counter cyclically over the available sequences.
-    */
     const int32_t message_index =
         macseq % entry.msg_count;
 
@@ -352,6 +373,7 @@ bool OsnmaMacLookupTable::GetExpectedSlot(int32_t maclt,
 
 bool OsnmaMacLookupTable::IsTagConsistent(int32_t maclt,
     int32_t macseq,
+    int32_t prna,
     const OsnmaMackTagInfo& tag)
 {
     OsnmaMacLookupSlot expected{};
@@ -360,9 +382,13 @@ bool OsnmaMacLookupTable::IsTagConsistent(int32_t maclt,
         return false;
 
     if (IsFlexible(expected))
-        return tag.adkd != OsnmaAdkd::Reserved;
+    {
+        return tag.adkd != OsnmaAdkd::Reserved &&
+            IsTargetConsistent(expected, prna, tag.prnd);
+    }
 
-    return SameAdkd(expected.adkd, tag.adkd);
+    return SameAdkd(expected.adkd, tag.adkd) &&
+        IsTargetConsistent(expected, prna, tag.prnd);
 }
 
 int32_t OsnmaMacLookupTable::GetNominalDelaySubframes(
