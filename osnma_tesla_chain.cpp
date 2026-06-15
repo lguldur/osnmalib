@@ -589,10 +589,9 @@ bool OsnmaTeslaChain::TransformOneStep(const std::uint8_t* input_key,
     }
     else if (hash_function_ == OsnmaHashFunction::Sha3_256)
     {
-        /*
-            SHA3-256 is not wired in osnma_crypto yet.
-        */
-        return false;
+        ok = OsnmaSha3_256(hash_input.data(),
+            hash_input_size,
+            digest.data());
     }
     else
     {
