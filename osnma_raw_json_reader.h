@@ -81,8 +81,12 @@ public:
         Convenience bridge for quick testing:
             JSONL file -> E1-B pages -> OsnmaAuthenticator::FeedRawInavPage()
 
-        odd_128b is currently zero because this JSON path gives us the
-        normalized 240-bit page from which we build the logical E1-B word image.
+        The raw JSON page is split into two internal 128-bit software buffers:
+            even_128b starts at raw bit 1
+            odd_128b  starts at raw bit 121
+
+        The odd buffer contains only the available 119 bits; the remaining bits
+        stay zero.
     */
     static bool FeedFileToAuthenticator(const char* filename,
         OsnmaAuthenticator& authenticator,

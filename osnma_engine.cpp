@@ -86,6 +86,21 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
         OsnmaDecodedDsm decoded{};
         AuthReason decode_reason = AuthReason::None;
 
+        printf("Completed DSM: PRN=%d DSM_ID=%d type=%d blocks=%d bytes=%d first=%02X %02X %02X %02X %02X %02X %02X %02X\n",
+            message.prn,
+            message.dsm_id,
+            static_cast<int32_t>(message.type),
+            message.block_count,
+            message.byte_count,
+            message.data[0],
+            message.data[1],
+            message.data[2],
+            message.data[3],
+            message.data[4],
+            message.data[5],
+            message.data[6],
+            message.data[7]);
+        
         const bool decoded_ok =
             dsm_content_decoder_.Decode(message,
                 decoded,
@@ -94,6 +109,15 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
         if (!decoded_ok)
         {
             ++statistics_.dsm_decode_failed;
+
+            const int32_t reason_index =
+                static_cast<int32_t>(decode_reason);
+
+            if (reason_index >= 0 &&
+                reason_index < static_cast<int32_t>(statistics_.dsm_decode_failed_reason_count.size()))
+            {
+                ++statistics_.dsm_decode_failed_reason_count[reason_index];
+            }
 
             return MakePendingResult(subframe,
                 source,

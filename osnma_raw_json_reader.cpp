@@ -224,17 +224,29 @@ bool OsnmaRawJsonReader::ParseLine(const std::string& line,
                             continue;
                         }
 
+                        static constexpr int32_t RAW_HALF_BITS = 120;
+
                         const int32_t even_offset =
                             raw_to_word_bit_offset;
 
                         const int32_t odd_offset =
-                            120 + raw_to_word_bit_offset;
+                            RAW_HALF_BITS - 1;
+
+                        const int32_t odd_bit_count =
+                            RAW_PAGE_BITS - odd_offset;
 
                         if (!CopyBitsMsb0Shifted(page.raw_240b.data(),
                             even_offset,
                             RAW_PAGE_BITS,
                             page.even_128b.data(),
-                            OSNMA_WORD_BITS))
+                            odd_bit_count))
+                        {
+                            ++stats.malformed_hex_count;
+                            ++page_index;
+                            continue;
+                        }
+
+                        if (odd_bit_count <= 0 || odd_bit_count > OSNMA_WORD_BITS)
                         {
                             ++stats.malformed_hex_count;
                             ++page_index;
@@ -245,15 +257,12 @@ bool OsnmaRawJsonReader::ParseLine(const std::string& line,
                             odd_offset,
                             RAW_PAGE_BITS,
                             page.odd_128b.data(),
-                            OSNMA_WORD_BITS))
+                            odd_bit_count))
                         {
                             ++stats.malformed_hex_count;
                             ++page_index;
                             continue;
                         }
-
-                        // Keep old debug field equal to even part for now.
-                        //page.word_128b = page.even_128b;
 
                         const int32_t wt =
                             GetUnsignedBitsMsb0(page.even_128b.data(), 0, 6);
