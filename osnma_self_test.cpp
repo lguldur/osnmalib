@@ -4,8 +4,10 @@
 #include <vector>
 
 #include "galileo_nav_candidate.h"
+#include "osnma_crypto.h"
 #include "osnma_mac_input.h"
 #include "osnma_mack.h"
+#include "osnma_tesla_chain.h"
 
 namespace
 {
@@ -26,6 +28,32 @@ namespace
             static_cast<std::uint32_t>(time.tow) & 0x000FFFFFu;
 
         return (wn << 20) | tow;
+    }
+
+    static void StoreGst32(const GnssTime& time,
+        std::uint8_t out[4])
+    {
+        const std::uint32_t value =
+            MakeGstSf32(time);
+
+        out[0] = static_cast<std::uint8_t>((value >> 24) & 0xFFu);
+        out[1] = static_cast<std::uint8_t>((value >> 16) & 0xFFu);
+        out[2] = static_cast<std::uint8_t>((value >> 8) & 0xFFu);
+        out[3] = static_cast<std::uint8_t>(value & 0xFFu);
+    }
+
+    static void StoreAlpha48(std::uint64_t alpha,
+        std::uint8_t out[6])
+    {
+        const std::uint64_t v =
+            alpha & 0x0000FFFFFFFFFFFFull;
+
+        out[0] = static_cast<std::uint8_t>((v >> 40) & 0xFFu);
+        out[1] = static_cast<std::uint8_t>((v >> 32) & 0xFFu);
+        out[2] = static_cast<std::uint8_t>((v >> 24) & 0xFFu);
+        out[3] = static_cast<std::uint8_t>((v >> 16) & 0xFFu);
+        out[4] = static_cast<std::uint8_t>((v >> 8) & 0xFFu);
+        out[5] = static_cast<std::uint8_t>(v & 0xFFu);
     }
 
     static void FillWord(GalileoNavCandidate& candidate,
@@ -225,6 +253,120 @@ namespace
 
         return true;
     }
+
+    static bool BuildSyntheticTeslaKrootSha256(OsnmaDsmKroot& kroot,
+        OsnmaMackMessage& mack,
+        bool wrong_disclosed_key)
+    {
+        kroot = OsnmaDsmKroot{};
+        mack = OsnmaMackMessage{};
+
+        /*
+            InitializeFromKroot() internally shifts KROOT GST by -30 s.
+
+            Therefore:
+                kroot GST       = WN 2000, TOW 36000
+                root key time   = WN 2000, TOW 35970
+                disclosed K1 at = WN 2000, TOW 36000
+        */
+        const int32_t wn = 2000;
+        const double kroot_tow_s = 36000.0;
+        const int32_t kroot_towh = 10;
+
+        GnssTime root_time{};
+        root_time.wn = wn;
+        root_time.tow = kroot_tow_s - 30.0;
+
+        GnssTime disclosed_time{};
+        disclosed_time.wn = wn;
+        disclosed_time.tow = kroot_tow_s;
+
+        const std::uint64_t alpha =
+            0x0000010203040506ull;
+
+        std::uint8_t disclosed_key[16]{};
+
+        for (int32_t i = 0; i < 16; ++i)
+        {
+            disclosed_key[i] =
+                static_cast<std::uint8_t>(0xA0u + i);
+        }
+
+        std::uint8_t hash_input[16 + 4 + 6]{};
+        int32_t hash_input_size = 0;
+
+        std::memcpy(hash_input + hash_input_size,
+            disclosed_key,
+            16);
+
+        hash_input_size += 16;
+
+        std::uint8_t gst_bytes[4]{};
+        StoreGst32(root_time, gst_bytes);
+
+        std::memcpy(hash_input + hash_input_size,
+            gst_bytes,
+            4);
+
+        hash_input_size += 4;
+
+        std::uint8_t alpha_bytes[6]{};
+        StoreAlpha48(alpha, alpha_bytes);
+
+        std::memcpy(hash_input + hash_input_size,
+            alpha_bytes,
+            6);
+
+        hash_input_size += 6;
+
+        std::uint8_t digest[32]{};
+
+        if (!OsnmaSha256(hash_input,
+            hash_input_size,
+            digest))
+        {
+            return false;
+        }
+
+        kroot.valid_layout = true;
+        kroot.hash_function = OsnmaHashFunction::Sha256;
+        kroot.mac_function = OsnmaMacFunction::HmacSha256;
+
+        kroot.key_size_bits = 128;
+        kroot.tag_size_bits = 40;
+        kroot.mac_lookup_table = 33;
+
+        kroot.kroot_wn = wn;
+        kroot.kroot_towh = kroot_towh;
+
+        kroot.alpha = alpha;
+
+        kroot.kroot_size_bytes = 16;
+
+        /*
+            K0 = trunc_128(SHA256(K1 || GST0 || alpha))
+        */
+        for (int32_t i = 0; i < 16; ++i)
+            kroot.kroot[i] = digest[i];
+
+        mack.valid_layout = true;
+        mack.prn = 7;
+        mack.subframe_epoch = disclosed_time;
+
+        mack.key_size_bits = 128;
+        mack.key_size_bytes = 16;
+
+        mack.tag_size_bits = 40;
+        mack.tag_size_bytes = 5;
+
+        for (int32_t i = 0; i < 16; ++i)
+            mack.disclosed_key[i] = disclosed_key[i];
+
+        if (wrong_disclosed_key)
+            mack.disclosed_key[0] ^= 0x01u;
+
+        return true;
+    }
 }
 
 OsnmaSelfTest::Result OsnmaSelfTest::RunAll()
@@ -236,6 +378,8 @@ OsnmaSelfTest::Result OsnmaSelfTest::RunAll()
     TestTagInfoAdkd4LengthAndCtr(result);
     TestMissingCedDataFails(result);
     TestMissingTimingDataFails(result);
+    TestTeslaSha256OneStepAcceptsValidKey(result);
+    TestTeslaSha256OneStepRejectsWrongKey(result);
 
     return result;
 }
@@ -440,6 +584,99 @@ bool OsnmaSelfTest::TestMissingTimingDataFails(Result& result)
     if (!Check(result,
         !ok,
         "ADKD4 unexpectedly succeeded with incomplete timing data"))
+    {
+        return false;
+    }
+
+    return true;
+}
+
+bool OsnmaSelfTest::TestTeslaSha256OneStepAcceptsValidKey(Result& result)
+{
+    ++result.test_count;
+
+    OsnmaDsmKroot kroot{};
+    OsnmaMackMessage mack{};
+
+    if (!Check(result,
+        BuildSyntheticTeslaKrootSha256(kroot,
+            mack,
+            false),
+        "TESLA SHA256 test-vector construction failed"))
+    {
+        return false;
+    }
+
+    OsnmaTeslaChain chain{};
+    AuthReason reason = AuthReason::None;
+
+    if (!Check(result,
+        chain.InitializeFromKroot(kroot,
+            reason),
+        "TESLA SHA256 InitializeFromKroot failed"))
+    {
+        return false;
+    }
+
+    if (!Check(result,
+        chain.VerifyAndStoreDisclosedKey(mack,
+            reason),
+        "TESLA SHA256 valid disclosed key rejected"))
+    {
+        return false;
+    }
+
+    if (!Check(result,
+        chain.HasKey(1),
+        "TESLA SHA256 valid disclosed key was not stored at index 1"))
+    {
+        return false;
+    }
+
+    return true;
+}
+
+bool OsnmaSelfTest::TestTeslaSha256OneStepRejectsWrongKey(Result& result)
+{
+    ++result.test_count;
+
+    OsnmaDsmKroot kroot{};
+    OsnmaMackMessage mack{};
+
+    if (!Check(result,
+        BuildSyntheticTeslaKrootSha256(kroot,
+            mack,
+            true),
+        "TESLA SHA256 wrong-key test-vector construction failed"))
+    {
+        return false;
+    }
+
+    OsnmaTeslaChain chain{};
+    AuthReason reason = AuthReason::None;
+
+    if (!Check(result,
+        chain.InitializeFromKroot(kroot,
+            reason),
+        "TESLA SHA256 wrong-key InitializeFromKroot failed"))
+    {
+        return false;
+    }
+
+    const bool accepted =
+        chain.VerifyAndStoreDisclosedKey(mack,
+            reason);
+
+    if (!Check(result,
+        !accepted,
+        "TESLA SHA256 wrong disclosed key was accepted"))
+    {
+        return false;
+    }
+
+    if (!Check(result,
+        !chain.HasKey(1),
+        "TESLA SHA256 wrong disclosed key was stored"))
     {
         return false;
     }

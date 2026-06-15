@@ -6,7 +6,7 @@
 #include "gnss_time.h"
 #include "nav_signal_source.h"
 
-// Galileo I/NAV logical page sizes
+// Galileo I/NAV logical word image size used by OSNMA authentication
 static constexpr int32_t GAL_INAV_BITS = 128;
 static constexpr int32_t GAL_INAV_BYTES = 16;
 

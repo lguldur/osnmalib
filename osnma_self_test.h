@@ -25,6 +25,8 @@ private:
     static bool TestTagInfoAdkd4LengthAndCtr(Result& result);
     static bool TestMissingCedDataFails(Result& result);
     static bool TestMissingTimingDataFails(Result& result);
+    static bool TestTeslaSha256OneStepAcceptsValidKey(Result& result);
+    static bool TestTeslaSha256OneStepRejectsWrongKey(Result& result);
 
     static void Fail(Result& result,
         const char* message);
