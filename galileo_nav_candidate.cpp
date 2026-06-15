@@ -23,8 +23,28 @@ bool GalileoNavCandidate::HasCedData() const
 
 bool GalileoNavCandidate::HasTimingData() const
 {
-    return HasWord(GAL_WT6) &&
-        HasWord(GAL_WT10);
+    if (!HasWord(GAL_WT6) || !HasWord(GAL_WT10))
+        return false;
+
+    const GalileoNavWord& wt6 = words[GAL_WT6];
+    const GalileoNavWord& wt10 = words[GAL_WT10];
+
+    if (!wt6.has_epoch || !wt10.has_epoch)
+        return false;
+
+    if (!IsTimeValid(wt6.page_epoch) ||
+        !IsTimeValid(wt10.page_epoch))
+    {
+        return false;
+    }
+
+    const double dt_s =
+        DiffSeconds(wt10.page_epoch, wt6.page_epoch);
+
+    if (dt_s < 0.0)
+        return false;
+
+    return dt_s <= 240.0;
 }
 
 bool GalileoNavCandidate::IsComplete() const
@@ -165,27 +185,75 @@ bool GalileoNavCandidateStore::FeedTimingPage(const GalileoInavPageParts& page,
         candidate.creation_time = page.page_epoch;
         candidate.last_update_time = page.page_epoch;
 
-        StoreWord(candidate, page, header.wt);
+        if (header.wt == GAL_WT6)
+        {
+            StoreWord(candidate, page, header.wt);
+            candidates_[key] = candidate;
 
-        candidates_[key] = candidate;
+            reason_out = AuthReason::None;
+            return true;
+        }
+
+        // WT10 is accepted only after WT6.
+        reason_out = AuthReason::WaitingForMoreFrames;
+        return false;
+    }
+
+    GalileoNavCandidate& candidate = it->second;
+
+    if (header.wt == GAL_WT6)
+    {
+        /*
+            WT6 anchors an ADKD=4 timing pair.
+            A new WT6 invalidates any old WT10 to avoid mixing generations.
+        */
+        StoreWord(candidate, page, GAL_WT6);
+        ClearWord(candidate, GAL_WT10);
+
+        candidate.last_update_time = page.page_epoch;
 
         reason_out = AuthReason::None;
         return true;
     }
 
-    GalileoNavCandidate& candidate = it->second;
+    if (header.wt == GAL_WT10)
+    {
+        /*
+            WT10 must belong to the current WT6-anchored timing pair.
+        */
+        if (!candidate.HasWord(GAL_WT6))
+        {
+            reason_out = AuthReason::WaitingForMoreFrames;
+            return false;
+        }
 
-    /*
-        Timing parameters are not WT1-anchored.
-        Keep the latest WT6 / WT10 pair for ADKD=4.
-    */
+        const GalileoNavWord& wt6 = candidate.words[GAL_WT6];
 
-    StoreWord(candidate, page, header.wt);
+        if (!wt6.has_epoch || !IsTimeValid(wt6.page_epoch))
+        {
+            reason_out = AuthReason::InvalidTime;
+            return false;
+        }
 
-    candidate.last_update_time = page.page_epoch;
+        const double dt_s =
+            DiffSeconds(page.page_epoch, wt6.page_epoch);
 
-    reason_out = AuthReason::None;
-    return true;
+        if (dt_s < 0.0 || dt_s > TIMING_PAIR_MAX_SPAN_S)
+        {
+            reason_out = AuthReason::TimeInconsistency;
+            return false;
+        }
+
+        StoreWord(candidate, page, GAL_WT10);
+
+        candidate.last_update_time = page.page_epoch;
+
+        reason_out = AuthReason::None;
+        return true;
+    }
+
+    reason_out = AuthReason::UnsupportedMessage;
+    return false;
 }
 
 void GalileoNavCandidateStore::Cleanup(const GnssTime& now)
@@ -294,6 +362,9 @@ GalileoNavCandidateStore::FindForAdkd(int32_t prn,
         const GalileoNavCandidate& candidate = it->second;
 
         if (!candidate.HasTimingData())
+            return nullptr;
+
+        if (!IsValidTimingPair(candidate))
             return nullptr;
 
         if (IsExpired(candidate, now))
@@ -412,7 +483,7 @@ bool GalileoNavCandidateStore::IsExpired(const GalileoNavCandidate& candidate,
     if (age_s < 0.0 || idle_s < 0.0)
         return true;
 
-    if (candidate.HasCedData() || candidate.HasTimingData())
+    if (candidate.HasCedData() || IsValidTimingPair(candidate))
         return age_s > COMPLETE_LIFETIME_S;
 
     return idle_s > PARTIAL_TIMEOUT_S;
@@ -427,9 +498,51 @@ void GalileoNavCandidateStore::StoreWord(GalileoNavCandidate& candidate,
 
     GalileoNavWord& word = candidate.words[wt];
 
+    word = GalileoNavWord{};
+
     word.wt = wt;
+    word.page_epoch = page.page_epoch;
+    word.has_epoch = true;
     word.valid = true;
 
     std::memcpy(word.even.data(), page.even, GAL_INAV_BYTES);
     std::memcpy(word.odd.data(), page.odd, GAL_INAV_BYTES);
+}
+
+void GalileoNavCandidateStore::ClearWord(GalileoNavCandidate& candidate,
+    int32_t wt)
+{
+    if (wt < 0 || wt > GAL_MAX_WT)
+        return;
+
+    candidate.words[wt] = GalileoNavWord{};
+}
+
+bool GalileoNavCandidateStore::IsValidTimingPair(const GalileoNavCandidate& candidate)
+{
+    if (!candidate.HasWord(GAL_WT6) ||
+        !candidate.HasWord(GAL_WT10))
+    {
+        return false;
+    }
+
+    const GalileoNavWord& wt6 = candidate.words[GAL_WT6];
+    const GalileoNavWord& wt10 = candidate.words[GAL_WT10];
+
+    if (!wt6.has_epoch || !wt10.has_epoch)
+        return false;
+
+    if (!IsTimeValid(wt6.page_epoch) ||
+        !IsTimeValid(wt10.page_epoch))
+    {
+        return false;
+    }
+
+    const double dt_s =
+        DiffSeconds(wt10.page_epoch, wt6.page_epoch);
+
+    if (dt_s < 0.0 || dt_s > TIMING_PAIR_MAX_SPAN_S)
+        return false;
+
+    return true;
 }

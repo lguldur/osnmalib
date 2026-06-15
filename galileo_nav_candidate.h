@@ -23,6 +23,9 @@ struct GalileoNavWord
 {
     int32_t wt = 0;
 
+    GnssTime page_epoch{};
+    bool has_epoch = false;
+
     std::array<std::uint8_t, GAL_INAV_BYTES> even{};
     std::array<std::uint8_t, GAL_INAV_BYTES> odd{};
 
@@ -81,6 +84,10 @@ private:
     static constexpr double PARTIAL_TIMEOUT_S = 240.0;
     static constexpr double COMPLETE_LIFETIME_S = 600.0;
 
+    // WT6-anchored ADKD=4 timing pair guard.
+    // This is intentionally conservative and prevents mixing unrelated WT6/WT10.
+    static constexpr double TIMING_PAIR_MAX_SPAN_S = 240.0;
+
 private:
     std::map<Key, GalileoNavCandidate> candidates_;
 
@@ -98,6 +105,11 @@ private:
     static void StoreWord(GalileoNavCandidate& candidate,
         const GalileoInavPageParts& page,
         int32_t wt);
+
+    static void ClearWord(GalileoNavCandidate& candidate,
+        int32_t wt);
+
+    static bool IsValidTimingPair(const GalileoNavCandidate& candidate);
 
     bool FeedCedPage(const GalileoInavPageParts& page,
         const PageHeader& header,
