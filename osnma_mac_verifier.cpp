@@ -3,7 +3,9 @@
 #include <array>
 #include <vector>
 
+#include "osnma_bit_utils.h"
 #include "osnma_crypto.h"
+#include "osnma_mac_lookup.h"
 
 OsnmaMacVerifier::Result
 OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
@@ -20,6 +22,23 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
     if (!mack.valid_layout)
     {
         result.reason = AuthReason::InvalidFrameFormat;
+        return result;
+    }
+
+    /*
+        Before validating individual tags, validate MACSEQ.
+
+        MACSEQ authenticates:
+            PRNA || GST_SF || tag_info of FLX slots
+
+        The key is the same next-subframe TESLA key used for normal ADKD=0
+        authentication.
+    */
+    if (!VerifyMacseq(mack,
+        tesla_chain,
+        mac_function))
+    {
+        result.reason = AuthReason::MackVerificationFailed;
         return result;
     }
 
@@ -191,6 +210,176 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
         result.reason = AuthReason::MackVerificationFailed;
 
     return result;
+}
+
+bool OsnmaMacVerifier::VerifyMacseq(const OsnmaMackMessage& mack,
+    const OsnmaTeslaChain& tesla_chain,
+    OsnmaMacFunction mac_function)
+{
+    if (!mack.valid_layout)
+        return false;
+
+    if (mack.prn <= 0 || mack.prn > 255)
+        return false;
+
+    const int32_t maclt =
+        tesla_chain.GetMacLookupTable();
+
+    if (maclt < 0)
+        return false;
+
+    /*
+        MACSEQ uses the next-subframe TESLA key. This is the same key selected
+        for Tag0 / ADKD=0 self-authentication.
+    */
+    OsnmaMackTagInfo tag0_info{};
+    tag0_info.index = 0;
+    tag0_info.prnd = mack.prn;
+    tag0_info.adkd = OsnmaAdkd::InavCed;
+    tag0_info.cop = mack.cop;
+    tag0_info.tag_size_bits = mack.tag_size_bits;
+    tag0_info.tag_size_bytes = mack.tag_size_bytes;
+    tag0_info.valid_info = true;
+
+    const std::uint8_t* key = nullptr;
+    int32_t key_size_bytes = 0;
+
+    if (!tesla_chain.GetKeyForTag(mack,
+        tag0_info,
+        key,
+        key_size_bytes))
+    {
+        return false;
+    }
+
+    std::vector<std::uint8_t> macseq_input;
+
+    if (!BuildMacseqInput(mack,
+        maclt,
+        macseq_input))
+    {
+        return false;
+    }
+
+    std::array<std::uint8_t, OsnmaMackTagInfo::MAX_TAG_BYTES> computed{};
+
+    const bool computed_ok =
+        ComputeMac(mac_function,
+            key,
+            key_size_bytes,
+            macseq_input.data(),
+            static_cast<int32_t>(macseq_input.size()),
+            computed.data(),
+            2);
+
+    if (!computed_ok)
+        return false;
+
+    /*
+        MACSEQ is the first 12 bits of the MAC output.
+    */
+    const std::uint8_t expected0 =
+        static_cast<std::uint8_t>((mack.macseq >> 4) & 0xFF);
+
+    const std::uint8_t expected1_high =
+        static_cast<std::uint8_t>((mack.macseq & 0x0F) << 4);
+
+    if (computed[0] != expected0)
+        return false;
+
+    if ((computed[1] & 0xF0u) != expected1_high)
+        return false;
+
+    return true;
+}
+
+bool OsnmaMacVerifier::BuildMacseqInput(const OsnmaMackMessage& mack,
+    int32_t maclt,
+    std::vector<std::uint8_t>& out)
+{
+    out.clear();
+
+    if (!mack.valid_layout)
+        return false;
+
+    if (mack.prn <= 0 || mack.prn > 255)
+        return false;
+
+    if (!IsTimeValid(mack.subframe_epoch))
+        return false;
+
+    out.reserve(5 + 2 * OsnmaMackMessage::MAX_TAGS);
+
+    out.push_back(static_cast<std::uint8_t>(mack.prn));
+
+    AppendGstSf32(mack.subframe_epoch,
+        out);
+
+    /*
+        For each FLX slot selected by MACLT/GST row, append the corresponding
+        raw 16-bit Tag-Info field.
+
+        Important: use the raw bits from the MACK message, not the decoded
+        ADKD enum, because FLX can legally contain values that are not fixed
+        by the MACLT table.
+    */
+    for (int32_t tag_number = 1;
+        tag_number < mack.total_tag_count;
+        ++tag_number)
+    {
+        OsnmaMacLookupSlot slot{};
+
+        if (!OsnmaMacLookupTable::GetExpectedSlot(maclt,
+            mack.subframe_epoch,
+            tag_number,
+            slot))
+        {
+            return false;
+        }
+
+        if (slot.target != OsnmaMacTagAuthTarget::Flexible)
+            continue;
+
+        const int32_t tag_and_info_bits =
+            mack.tag_size_bits + 16;
+
+        const int32_t tag_info_start =
+            tag_number * tag_and_info_bits + mack.tag_size_bits;
+
+        if ((tag_info_start + 16) > OsnmaMackMessage::MACK_BITS)
+            return false;
+
+        std::uint8_t tag_info_bytes[2]{};
+
+        CopyBitsMsb0(mack.raw.data(),
+            tag_info_start,
+            16,
+            tag_info_bytes,
+            2);
+
+        out.push_back(tag_info_bytes[0]);
+        out.push_back(tag_info_bytes[1]);
+    }
+
+    return !out.empty();
+}
+
+void OsnmaMacVerifier::AppendGstSf32(const GnssTime& time,
+    std::vector<std::uint8_t>& out)
+{
+    const std::uint32_t wn =
+        static_cast<std::uint32_t>(time.wn) & 0x0FFFu;
+
+    const std::uint32_t tow =
+        static_cast<std::uint32_t>(time.tow) & 0x000FFFFFu;
+
+    const std::uint32_t value =
+        (wn << 20) | tow;
+
+    out.push_back(static_cast<std::uint8_t>((value >> 24) & 0xFFu));
+    out.push_back(static_cast<std::uint8_t>((value >> 16) & 0xFFu));
+    out.push_back(static_cast<std::uint8_t>((value >> 8) & 0xFFu));
+    out.push_back(static_cast<std::uint8_t>(value & 0xFFu));
 }
 
 bool OsnmaMacVerifier::ComputeMac(OsnmaMacFunction mac_function,

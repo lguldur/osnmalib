@@ -127,6 +127,11 @@ bool OsnmaTeslaChain::IsInitialized() const
     return initialized_;
 }
 
+int32_t OsnmaTeslaChain::GetMacLookupTable() const
+{
+    return mac_lookup_table_;
+}
+
 bool OsnmaTeslaChain::VerifyAndStoreDisclosedKey(const OsnmaMackMessage& mack,
     AuthReason& reason_out)
 {

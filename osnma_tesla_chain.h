@@ -22,6 +22,8 @@ public:
 
     bool IsInitialized() const;
 
+    int32_t GetMacLookupTable() const;
+
     bool VerifyAndStoreDisclosedKey(const OsnmaMackMessage& mack,
         AuthReason& reason_out);
 

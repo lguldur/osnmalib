@@ -27,6 +27,17 @@ public:
         const GnssTime& now) const;
 
 private:
+    static bool VerifyMacseq(const OsnmaMackMessage& mack,
+        const OsnmaTeslaChain& tesla_chain,
+        OsnmaMacFunction mac_function);
+
+    static bool BuildMacseqInput(const OsnmaMackMessage& mack,
+        int32_t maclt,
+        std::vector<std::uint8_t>& out);
+
+    static void AppendGstSf32(const GnssTime& time,
+        std::vector<std::uint8_t>& out);
+
     static bool ComputeMac(OsnmaMacFunction mac_function,
         const std::uint8_t* key,
         int32_t key_size_bytes,
