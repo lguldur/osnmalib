@@ -19,6 +19,12 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
     result.state = AuthState::Unknown;
     result.reason = AuthReason::MissingNavData;
 
+    result.debug_mack_prn = mack.prn;
+    result.debug_mack_wn = mack.subframe_epoch.wn;
+    result.debug_mack_tow = mack.subframe_epoch.tow;
+    result.debug_macseq = mack.macseq;
+    result.debug_mack_cop = mack.cop;
+
     if (!mack.valid_layout)
     {
         result.reason = AuthReason::InvalidFrameFormat;
@@ -41,6 +47,13 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
 
     if (macseq_status != MacseqStatus::Ok)
     {
+        result.debug_stage = 1;
+        result.debug_tag_index = -1;
+        result.debug_ctr = -1;
+        result.debug_prnd = mack.prn;
+        result.debug_adkd = OsnmaAdkd::InavCed;
+        result.debug_tag_cop = mack.cop;
+
         result.reason =
             ReasonFromMacseqStatus(macseq_status);
 
@@ -59,10 +72,22 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
             CTR  = 1
     */
     {
+        result.debug_stage = 2;
+        result.debug_tag_index = 0;
+        result.debug_ctr = 1;
+        result.debug_prnd = mack.prn;
+        result.debug_adkd = OsnmaAdkd::InavCed;
+        result.debug_tag_cop = mack.cop;
+        result.debug_has_nav = false;
+        result.debug_has_key = false;
+        result.debug_has_mac_input = false;
+
         const GalileoNavCandidate* tag0_candidate =
             nav_store.FindForAdkd(mack.prn,
                 OsnmaAdkd::InavCed,
                 now);
+
+        result.debug_has_nav = (tag0_candidate != nullptr);
 
         if (tag0_candidate != nullptr)
         {
@@ -90,6 +115,7 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
                 key_size_bytes))
             {
                 saw_key = true;
+                result.debug_has_key = true;
 
                 std::vector<std::uint8_t> mac_input;
 
@@ -99,6 +125,7 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
                     mac_input))
                 {
                     saw_mac_input = true;
+                    result.debug_has_mac_input = true;
 
                     std::array<std::uint8_t, OsnmaMackTagInfo::MAX_TAG_BYTES> computed{};
 
@@ -140,10 +167,22 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
         if (!tag.valid_info)
             continue;
 
+        result.debug_stage = 3;
+        result.debug_tag_index = tag.index;
+        result.debug_ctr = tag.index + 1;
+        result.debug_prnd = tag.prnd;
+        result.debug_adkd = tag.adkd;
+        result.debug_tag_cop = tag.cop;
+        result.debug_has_nav = false;
+        result.debug_has_key = false;
+        result.debug_has_mac_input = false;
+
         const GalileoNavCandidate* candidate =
             nav_store.FindForAdkd(tag.prnd,
                 tag.adkd,
                 now);
+
+        result.debug_has_nav = (candidate != nullptr);
 
         if (candidate == nullptr)
             continue;
@@ -162,6 +201,7 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
         }
 
         saw_key = true;
+        result.debug_has_key = true;
 
         std::vector<std::uint8_t> mac_input;
 
@@ -175,6 +215,7 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
         }
 
         saw_mac_input = true;
+        result.debug_has_mac_input = true;
 
         std::array<std::uint8_t, OsnmaMackTagInfo::MAX_TAG_BYTES> computed{};
 
@@ -373,14 +414,38 @@ bool OsnmaMacVerifier::BuildMacseqInput(const OsnmaMackMessage& mack,
 void OsnmaMacVerifier::AppendGstSf32(const GnssTime& time,
     std::vector<std::uint8_t>& out)
 {
-    const std::uint32_t wn =
-        static_cast<std::uint32_t>(time.wn) & 0x0FFFu;
+    /*
+        OSNMA GST_SF for Galileo E1 I/NAV is the E1 sub-frame start time
+        minus 1 second.
 
-    const std::uint32_t tow =
-        static_cast<std::uint32_t>(time.tow) & 0x000FFFFFu;
+        Do not change mack.subframe_epoch itself: keep it as the 30 s
+        boundary for queueing/key-index logic. Only encode GST_SF like this
+        for MAC input construction.
+    */
+
+    int32_t wn = time.wn;
+    double tow_d = time.tow - 1.0;
+
+    while (tow_d < 0.0)
+    {
+        --wn;
+        tow_d += 604800.0;
+    }
+
+    while (tow_d >= 604800.0)
+    {
+        ++wn;
+        tow_d -= 604800.0;
+    }
+
+    const std::uint32_t wn_u =
+        static_cast<std::uint32_t>(wn) & 0x0FFFu;
+
+    const std::uint32_t tow_u =
+        static_cast<std::uint32_t>(tow_d) & 0x000FFFFFu;
 
     const std::uint32_t value =
-        (wn << 20) | tow;
+        (wn_u << 20) | tow_u;
 
     out.push_back(static_cast<std::uint8_t>((value >> 24) & 0xFFu));
     out.push_back(static_cast<std::uint8_t>((value >> 16) & 0xFFu));

@@ -31,6 +31,44 @@ namespace
         return (wn << 20) | tow;
     }
 
+    static std::uint32_t MakeMacGstSf32(const GnssTime& time)
+    {
+        int32_t wn = time.wn;
+        double tow_d = time.tow - 1.0;
+
+        while (tow_d < 0.0)
+        {
+            --wn;
+            tow_d += 604800.0;
+        }
+
+        while (tow_d >= 604800.0)
+        {
+            ++wn;
+            tow_d -= 604800.0;
+        }
+
+        const std::uint32_t wn_u =
+            static_cast<std::uint32_t>(wn) & 0x0FFFu;
+
+        const std::uint32_t tow_u =
+            static_cast<std::uint32_t>(tow_d) & 0x000FFFFFu;
+
+        return (wn_u << 20) | tow_u;
+    }
+
+    static void StoreMacGst32(const GnssTime& time,
+        std::uint8_t out[4])
+    {
+        const std::uint32_t value =
+            MakeMacGstSf32(time);
+
+        out[0] = static_cast<std::uint8_t>((value >> 24) & 0xFFu);
+        out[1] = static_cast<std::uint8_t>((value >> 16) & 0xFFu);
+        out[2] = static_cast<std::uint8_t>((value >> 8) & 0xFFu);
+        out[3] = static_cast<std::uint8_t>(value & 0xFFu);
+    }
+
     static void StoreGst32(const GnssTime& time,
         std::uint8_t out[4])
     {
@@ -249,7 +287,7 @@ namespace
             return false;
 
         const std::uint32_t gst =
-            MakeGstSf32(MakeTestTime());
+            MakeMacGstSf32(MakeTestTime());
 
         if (msg[0] != expected_prnd)
             return false;
@@ -491,7 +529,8 @@ namespace
         macseq_input.push_back(static_cast<std::uint8_t>(tag_mack.prn));
 
         std::uint8_t gst_bytes[4]{};
-        StoreGst32(tag_mack.subframe_epoch,
+        
+        StoreMacGst32(tag_mack.subframe_epoch,
             gst_bytes);
 
         macseq_input.push_back(gst_bytes[0]);

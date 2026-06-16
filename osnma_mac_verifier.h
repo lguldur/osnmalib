@@ -17,6 +17,34 @@ public:
     {
         AuthState state = AuthState::Unknown;
         AuthReason reason = AuthReason::None;
+
+        /*
+            Debug information filled by Verify().
+            This is intentionally plain data so OsnmaEngine can print a useful
+            terminal-failure line without knowing the verifier local variables.
+
+            debug_stage:
+                0 = none
+                1 = MACSEQ
+                2 = Tag0
+                3 = Tag-Info
+        */
+        int32_t debug_stage = 0;
+        int32_t debug_mack_prn = -1;
+        int32_t debug_mack_wn = -1;
+        double debug_mack_tow = -1.0;
+        int32_t debug_macseq = -1;
+        int32_t debug_mack_cop = -1;
+
+        int32_t debug_tag_index = -1;
+        int32_t debug_ctr = -1;
+        int32_t debug_prnd = -1;
+        OsnmaAdkd debug_adkd = OsnmaAdkd::Reserved;
+        int32_t debug_tag_cop = -1;
+
+        bool debug_has_nav = false;
+        bool debug_has_key = false;
+        bool debug_has_mac_input = false;
     };
 
 public:

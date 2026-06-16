@@ -353,11 +353,31 @@ std::uint32_t OsnmaMacInputBuilder::GstSf32(const GnssTime& time)
     if (!IsTimeValid(time))
         return 0;
 
-    const std::uint32_t wn =
-        static_cast<std::uint32_t>(time.wn) & 0x0FFFu;
+    /*
+        Same GST_SF convention as MACSEQ:
+        Galileo E1 I/NAV sub-frame start time minus 1 second.
+    */
 
-    const std::uint32_t tow =
-        static_cast<std::uint32_t>(time.tow) & 0x000FFFFFu;
+    int32_t wn = time.wn;
+    double tow_d = time.tow - 1.0;
 
-    return (wn << 20) | tow;
+    while (tow_d < 0.0)
+    {
+        --wn;
+        tow_d += 604800.0;
+    }
+
+    while (tow_d >= 604800.0)
+    {
+        ++wn;
+        tow_d -= 604800.0;
+    }
+
+    const std::uint32_t wn_u =
+        static_cast<std::uint32_t>(wn) & 0x0FFFu;
+
+    const std::uint32_t tow_u =
+        static_cast<std::uint32_t>(tow_d) & 0x000FFFFFu;
+
+    return (wn_u << 20) | tow_u;
 }
