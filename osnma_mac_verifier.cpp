@@ -90,6 +90,27 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
 
         result.debug_has_nav = (tag0_candidate != nullptr);
 
+        if (tag0_candidate == nullptr)
+        {
+            static int32_t tag0_missing_nav_debug_count = 0;
+
+            if (tag0_missing_nav_debug_count < 40)
+            {
+                printf("NAVDATA lookup failed: stage=2 prna=%d prnd=%d adkd=%d ctr=%d tag_index=%d mack_wn=%d mack_tow=%.0f requested_wn=%d requested_tow=%.0f\n",
+                    mack.prn,
+                    mack.prn,
+                    static_cast<int32_t>(OsnmaAdkd::InavCed),
+                    1,
+                    0,
+                    mack.subframe_epoch.wn,
+                    mack.subframe_epoch.tow,
+                    now.wn,
+                    now.tow);
+
+                ++tag0_missing_nav_debug_count;
+            }
+        }
+
         if (tag0_candidate != nullptr)
         {
             saw_candidate = true;
@@ -186,7 +207,28 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
         result.debug_has_nav = (candidate != nullptr);
 
         if (candidate == nullptr)
+        {
+            static int32_t tag_missing_nav_debug_count = 0;
+
+            if (tag_missing_nav_debug_count < 80)
+            {
+                printf("NAVDATA lookup failed: stage=3 prna=%d prnd=%d adkd=%d ctr=%d tag_index=%d tag_cop=%d mack_wn=%d mack_tow=%.0f requested_wn=%d requested_tow=%.0f\n",
+                    mack.prn,
+                    tag.prnd,
+                    static_cast<int32_t>(tag.adkd),
+                    tag.index + 1,
+                    tag.index,
+                    tag.cop,
+                    mack.subframe_epoch.wn,
+                    mack.subframe_epoch.tow,
+                    now.wn,
+                    now.tow);
+
+                ++tag_missing_nav_debug_count;
+            }
+
             continue;
+        }
 
         saw_candidate = true;
 

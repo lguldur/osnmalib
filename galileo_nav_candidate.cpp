@@ -1,5 +1,6 @@
 #include "galileo_nav_candidate.h"
 
+#include <cstdio>
 #include <cstring>
 
 #include "osnma_bit_utils.h"
@@ -118,6 +119,21 @@ bool GalileoNavCandidateStore::FeedCedPage(const GalileoInavPageParts& page,
     {
         if (header.wt != GAL_WT1)
         {
+            static int32_t ced_reject_debug_count = 0;
+
+            if (ced_reject_debug_count < 120)
+            {
+                printf("NAVDATA rejected: prn=%d wt=%d iod=%d toe=%d wn=%d tow=%.0f reason=no WT1 candidate with same iod\n",
+                    page.prn,
+                    header.wt,
+                    header.iod,
+                    header.toe,
+                    page.page_epoch.wn,
+                    page.page_epoch.tow);
+
+                ++ced_reject_debug_count;
+            }
+
             reason_out = AuthReason::WaitingForMoreFrames;
             return false;
         }
@@ -143,6 +159,26 @@ bool GalileoNavCandidateStore::FeedCedPage(const GalileoInavPageParts& page,
 
     if (!CanAcceptCedWord(candidate, header.wt))
     {
+        static int32_t ced_order_debug_count = 0;
+
+        if (ced_order_debug_count < 120)
+        {
+            printf("NAVDATA rejected: prn=%d wt=%d iod=%d toe=%d wn=%d tow=%.0f reason=bad sequence have1=%d have2=%d have3=%d have4=%d have5=%d\n",
+                page.prn,
+                header.wt,
+                header.iod,
+                header.toe,
+                page.page_epoch.wn,
+                page.page_epoch.tow,
+                candidate.HasWord(GAL_WT1) ? 1 : 0,
+                candidate.HasWord(GAL_WT2) ? 1 : 0,
+                candidate.HasWord(GAL_WT3) ? 1 : 0,
+                candidate.HasWord(GAL_WT4) ? 1 : 0,
+                candidate.HasWord(GAL_WT5) ? 1 : 0);
+
+            ++ced_order_debug_count;
+        }
+
         reason_out = AuthReason::WaitingForMoreFrames;
         return false;
     }
@@ -507,6 +543,34 @@ void GalileoNavCandidateStore::StoreWord(GalileoNavCandidate& candidate,
 
     std::memcpy(word.even.data(), page.even, GAL_INAV_BYTES);
     std::memcpy(word.odd.data(), page.odd, GAL_INAV_BYTES);
+
+    static int32_t nav_store_debug_count = 0;
+
+    if (nav_store_debug_count < 80)
+    {
+        const bool has_ced_now =
+            candidate.HasWord(GAL_WT1) &&
+            candidate.HasWord(GAL_WT2) &&
+            candidate.HasWord(GAL_WT3) &&
+            candidate.HasWord(GAL_WT4) &&
+            candidate.HasWord(GAL_WT5);
+
+        const bool has_timing_now =
+            candidate.HasWord(GAL_WT6) &&
+            candidate.HasWord(GAL_WT10);
+
+        printf("NAVDATA stored: prn=%d iod=%d toe=%d wt=%d wn=%d tow=%.0f has_ced=%d has_timing=%d\n",
+            candidate.prn,
+            candidate.iod,
+            candidate.toe,
+            wt,
+            page.page_epoch.wn,
+            page.page_epoch.tow,
+            has_ced_now ? 1 : 0,
+            has_timing_now ? 1 : 0);
+
+        ++nav_store_debug_count;
+    }
 }
 
 void GalileoNavCandidateStore::ClearWord(GalileoNavCandidate& candidate,
