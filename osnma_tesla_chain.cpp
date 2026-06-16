@@ -255,6 +255,42 @@ bool OsnmaTeslaChain::GetKeyForTag(const OsnmaMackMessage& mack,
     return true;
 }
 
+bool OsnmaTeslaChain::GetKeyForTime(const GnssTime& time,
+    const std::uint8_t*& key,
+    int32_t& key_size_bytes) const
+{
+    key = nullptr;
+    key_size_bytes = 0;
+
+    if (!initialized_)
+        return false;
+
+    if (!IsTimeValid(time))
+        return false;
+
+    const int32_t key_index =
+        ComputeDisclosureIndex(time);
+
+    if (key_index < 0)
+        return false;
+
+    const int32_t slot =
+        FindKeySlot(key_index);
+
+    if (slot < 0)
+        return false;
+
+    const KeyEntry& entry = keys_[slot];
+
+    if (!entry.valid || !entry.verified)
+        return false;
+
+    key = entry.key.data();
+    key_size_bytes = entry.size_bytes;
+
+    return true;
+}
+
 bool OsnmaTeslaChain::HasKey(int32_t key_index) const
 {
     return FindKeySlot(key_index) >= 0;

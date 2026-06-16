@@ -453,38 +453,14 @@ bool OsnmaMacVerifier::BuildMacseqInput(const OsnmaMackMessage& mack,
 void OsnmaMacVerifier::AppendGstSf32(const GnssTime& time,
     std::vector<std::uint8_t>& out)
 {
-    /*
-        OSNMA GST_SF for Galileo E1 I/NAV is the E1 sub-frame start time
-        minus 1 second.
+    const std::uint32_t wn =
+        static_cast<std::uint32_t>(time.wn) & 0x0FFFu;
 
-        Do not change mack.subframe_epoch itself: keep it as the 30 s
-        boundary for queueing/key-index logic. Only encode GST_SF like this
-        for MAC input construction.
-    */
-
-    int32_t wn = time.wn;
-    double tow_d = time.tow - 1.0;
-
-    while (tow_d < 0.0)
-    {
-        --wn;
-        tow_d += 604800.0;
-    }
-
-    while (tow_d >= 604800.0)
-    {
-        ++wn;
-        tow_d -= 604800.0;
-    }
-
-    const std::uint32_t wn_u =
-        static_cast<std::uint32_t>(wn) & 0x0FFFu;
-
-    const std::uint32_t tow_u =
-        static_cast<std::uint32_t>(tow_d) & 0x000FFFFFu;
+    const std::uint32_t tow =
+        static_cast<std::uint32_t>(time.tow) & 0x000FFFFFu;
 
     const std::uint32_t value =
-        (wn_u << 20) | tow_u;
+        (wn << 20) | tow;
 
     out.push_back(static_cast<std::uint8_t>((value >> 24) & 0xFFu));
     out.push_back(static_cast<std::uint8_t>((value >> 16) & 0xFFu));

@@ -359,19 +359,7 @@ std::uint32_t OsnmaMacInputBuilder::GstSf32(const GnssTime& time)
     */
 
     int32_t wn = time.wn;
-    double tow_d = time.tow - 1.0;
-
-    while (tow_d < 0.0)
-    {
-        --wn;
-        tow_d += 604800.0;
-    }
-
-    while (tow_d >= 604800.0)
-    {
-        ++wn;
-        tow_d -= 604800.0;
-    }
+    double tow_d = time.tow;
 
     const std::uint32_t wn_u =
         static_cast<std::uint32_t>(wn) & 0x0FFFu;
