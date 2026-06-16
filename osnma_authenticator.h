@@ -32,6 +32,8 @@ public:
 
     const OsnmaEngine::Statistics& GetEngineStatistics() const;
 
+    bool SetMerkleRoot(const std::uint8_t* root_32_bytes);
+
 private:
     struct SatRecord
     {

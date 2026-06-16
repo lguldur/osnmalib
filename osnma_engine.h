@@ -43,7 +43,10 @@ public:
         std::array<std::int64_t, 16> dsm_id_count{};
         std::array<std::int64_t, 16> dsm_completed_id_count{};
         std::array<std::int64_t, 32> dsm_decode_failed_reason_count{};
-
+        std::array<std::int64_t, 32> kroot_failed_reason_count{};
+        std::array<std::int64_t, 32> pkr_failed_reason_count{};
+        std::array<std::array<std::int64_t, 16>, 16> dsm_bid_count{};
+        
         std::int64_t pkr_received = 0;
         std::int64_t pkr_verified = 0;
         std::int64_t pkr_failed = 0;

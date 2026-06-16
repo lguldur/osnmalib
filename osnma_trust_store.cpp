@@ -74,6 +74,13 @@ bool OsnmaTrustStore::AddKroot(const OsnmaDsmKroot& kroot,
     kroot_list_[idx].time = time;
     kroot_list_[idx].kroot = kroot;
 
+    /*printf("AddKroot verify: PKID=%d msg_len=%d sig_len=%d key_found=%d\n",
+        kroot.public_key_id,
+        signed_message_len,
+        signature_len,
+        public_key != nullptr ? 1 : 0);
+        */
+
     return verified;
 }
 

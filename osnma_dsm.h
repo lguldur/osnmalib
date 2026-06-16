@@ -93,5 +93,5 @@ private:
                          OsnmaDsmMessage& message_out);
 
 private:
-    std::array<SatState, MAX_PRN> sats_{};
+    std::array<std::array<SatState, 16>, MAX_PRN> sats_{};
 };

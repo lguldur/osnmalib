@@ -57,6 +57,14 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
         OsnmaDsmAssembler::ParseDsmHeader(
             static_cast<std::uint8_t>(subframe.hkroot[1]));
 
+    if (block.dsm_header.dsm_id >= 0 &&
+        block.dsm_header.dsm_id < static_cast<int32_t>(statistics_.dsm_bid_count.size()) &&
+        block.dsm_header.block_id >= 0 &&
+        block.dsm_header.block_id < static_cast<int32_t>(statistics_.dsm_bid_count[0].size()))
+    {
+        ++statistics_.dsm_bid_count[block.dsm_header.dsm_id][block.dsm_header.block_id];
+    }
+
     ++statistics_.dsm_blocks_received;
 
     if (block.dsm_header.dsm_id >= 0 &&
@@ -86,7 +94,7 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
         OsnmaDecodedDsm decoded{};
         AuthReason decode_reason = AuthReason::None;
 
-        printf("Completed DSM: PRN=%d DSM_ID=%d type=%d blocks=%d bytes=%d first=%02X %02X %02X %02X %02X %02X %02X %02X\n",
+        /*printf("Completed DSM: PRN=%d DSM_ID=%d type=%d blocks=%d bytes=%d first=%02X %02X %02X %02X %02X %02X %02X %02X\n",
             message.prn,
             message.dsm_id,
             static_cast<int32_t>(message.type),
@@ -100,7 +108,8 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
             message.data[5],
             message.data[6],
             message.data[7]);
-        
+        */
+
         const bool decoded_ok =
             dsm_content_decoder_.Decode(message,
                 decoded,
@@ -140,10 +149,22 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
             {
                 ++statistics_.pkr_failed;
 
+                const AuthReason pkr_reason =
+                    AuthReason::MerkleVerificationFailed;
+
+                const int32_t reason_index =
+                    static_cast<int32_t>(pkr_reason);
+
+                if (reason_index >= 0 &&
+                    reason_index < static_cast<int32_t>(statistics_.pkr_failed_reason_count.size()))
+                {
+                    ++statistics_.pkr_failed_reason_count[reason_index];
+                }
+
                 return MakePendingResult(subframe,
                     source,
                     raw_source,
-                    AuthReason::MerkleVerificationFailed);
+                    pkr_reason);
             }
 
             ++statistics_.pkr_verified;
@@ -154,6 +175,18 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
         {
             ++statistics_.kroot_received;
 
+            printf("KROOT decoded: DSM_ID=%d PKID=%d CID=%d HF=%d MF=%d KS=%d TS=%d MACLT=%d WN=%d TOWH=%d\n",
+                message.dsm_id,
+                decoded.kroot.public_key_id,
+                decoded.kroot.kroot_chain_id,
+                static_cast<int32_t>(decoded.kroot.hash_function),
+                static_cast<int32_t>(decoded.kroot.mac_function),
+                decoded.kroot.key_size_bits,
+                decoded.kroot.tag_size_bits,
+                decoded.kroot.mac_lookup_table,
+                decoded.kroot.kroot_wn,
+                decoded.kroot.kroot_towh);
+
             const bool verified =
                 trust_store_.AddKroot(decoded.kroot,
                     subframe.subframe_epoch);
@@ -162,10 +195,22 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
             {
                 ++statistics_.kroot_failed;
 
+                const AuthReason kroot_reason =
+                    AuthReason::SignatureVerificationFailed;
+
+                const int32_t reason_index =
+                    static_cast<int32_t>(kroot_reason);
+
+                if (reason_index >= 0 &&
+                    reason_index < static_cast<int32_t>(statistics_.kroot_failed_reason_count.size()))
+                {
+                    ++statistics_.kroot_failed_reason_count[reason_index];
+                }
+
                 return MakePendingResult(subframe,
                     source,
                     raw_source,
-                    AuthReason::SignatureVerificationFailed);
+                    kroot_reason);
             }
 
             ++statistics_.kroot_verified;

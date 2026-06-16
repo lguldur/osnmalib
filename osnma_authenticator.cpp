@@ -126,3 +126,8 @@ const OsnmaEngine::Statistics& OsnmaAuthenticator::GetEngineStatistics() const
 {
     return engine_.GetStatistics();
 }
+
+bool OsnmaAuthenticator::SetMerkleRoot(const std::uint8_t* root_32_bytes)
+{
+    return engine_.SetMerkleRoot(root_32_bytes);
+}

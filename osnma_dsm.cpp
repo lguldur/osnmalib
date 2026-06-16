@@ -2,8 +2,11 @@
 
 void OsnmaDsmAssembler::Reset()
 {
-    for (auto& s : sats_)
-        s = SatState{};
+    for (auto& prn_states : sats_)
+    {
+        for (auto& s : prn_states)
+            s = SatState{};
+    }
 }
 
 bool OsnmaDsmAssembler::IsValidPrn(int32_t prn) const
@@ -81,7 +84,9 @@ bool OsnmaDsmAssembler::FeedBlock(const OsnmaDsmBlock& block,
     if (header.block_id < 0 || header.block_id >= MAX_BLOCKS)
         return false;
 
-    SatState& sat = sats_[static_cast<std::size_t>(block.prn)];
+    SatState& sat =
+        sats_[static_cast<std::size_t>(block.prn)]
+        [static_cast<std::size_t>(header.dsm_id)];
 
     if (!sat.active ||
         sat.done ||
