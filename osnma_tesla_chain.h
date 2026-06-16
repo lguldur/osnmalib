@@ -32,9 +32,6 @@ public:
         const std::uint8_t*& key,
         int32_t& key_size_bytes) const;
 
-    bool GetKeyForTime(const GnssTime& time,
-        const std::uint8_t*& key,
-        int32_t& key_size_bytes) const;
 
     bool HasKey(int32_t key_index) const;
 

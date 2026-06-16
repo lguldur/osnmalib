@@ -371,8 +371,6 @@ bool OsnmaMacVerifier::BuildMacseqInput(const OsnmaMackMessage& mack,
     int32_t maclt,
     std::vector<std::uint8_t>& out)
 {
-    (void)maclt;
-
     out.clear();
 
     if (!mack.valid_layout)
@@ -398,23 +396,17 @@ bool OsnmaMacVerifier::BuildMacseqInput(const OsnmaMackMessage& mack,
         out);
 
     /*
-        Test variant for MACSEQ debugging.
+        MACSEQ input:
 
-        MACSEQ input is built from:
+            PRNA || GST_SF || Tag-Info of FLX slots
 
-            PRNA || GST_SF || all received raw 16-bit Tag-Info fields
+        This matches MACLT handling used by public OSNMA implementations:
+        do not include all Tag-Info fields, only the fields whose MACLT slot
+        is FLX for the current MACK subframe.
 
-        Do not filter by valid_info, ADKD, PRND, COP, or MACLT here.
-        The previous implementation only appended MACLT/Flexible-selected
-        Tag-Info fields, which produced variable input sizes such as 7 or
-        9 bytes. For KS=128 and TS=40 the parsed MACK geometry contains
-        five Tag-Info fields, so this variant should produce:
-
-            1 + 4 + 5 * 2 = 15 bytes
-
-        Important: use the raw bits from the received MACK message, not the
-        decoded enum values. This preserves reserved/dummy values exactly as
-        transmitted.
+        The Tag-Info bytes are copied from the raw received MACK bits instead
+        of reconstructed from decoded enum values, so reserved/dummy values are
+        preserved exactly.
     */
     const int32_t mack_header_bits =
         mack.tag_size_bits + 12 + 4;
@@ -427,6 +419,19 @@ bool OsnmaMacVerifier::BuildMacseqInput(const OsnmaMackMessage& mack,
 
     for (int32_t i = 0; i < mack.tag_info_count; ++i)
     {
+        OsnmaMacLookupSlot slot{};
+
+        if (!OsnmaMacLookupTable::GetExpectedSlot(maclt,
+            mack.subframe_epoch,
+            i + 1,
+            slot))
+        {
+            return false;
+        }
+
+        if (slot.target != OsnmaMacTagAuthTarget::Flexible)
+            continue;
+
         const int32_t tag_info_start =
             mack_header_bits +
             i * tag_and_info_bits +

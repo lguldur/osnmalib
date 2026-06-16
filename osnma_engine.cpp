@@ -471,6 +471,33 @@ OsnmaEngine::VerifyPendingMacks(const OsnmaDsmKroot& trusted_kroot,
 
         if (mac_result.reason == AuthReason::MissingNavData)
         {
+            static int32_t missing_nav_debug_count = 0;
+
+            if (mac_result.reason == AuthReason::MissingNavData &&
+                missing_nav_debug_count < 50)
+            {
+                printf("TAG missing navdata: "
+                    "stage=%d mack_prn=%d tag_index=%d ctr=%d "
+                    "prnd=%d adkd=%d tag_cop=%d mack_wn=%d mack_tow=%.0f "
+                    "macseq=%d mack_cop=%d has_nav=%d has_key=%d has_mac_input=%d\n",
+                    mac_result.debug_stage,
+                    mac_result.debug_mack_prn,
+                    mac_result.debug_tag_index,
+                    mac_result.debug_ctr,
+                    mac_result.debug_prnd,
+                    static_cast<int32_t>(mac_result.debug_adkd),
+                    mac_result.debug_tag_cop,
+                    mac_result.debug_mack_wn,
+                    mac_result.debug_mack_tow,
+                    mac_result.debug_macseq,
+                    mac_result.debug_mack_cop,
+                    mac_result.debug_has_nav ? 1 : 0,
+                    mac_result.debug_has_key ? 1 : 0,
+                    mac_result.debug_has_mac_input ? 1 : 0);
+
+                ++missing_nav_debug_count;
+            }
+
             ++statistics_.pending_missing_navdata;
             saw_missing_nav = true;
             continue;
