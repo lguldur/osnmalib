@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <map>
+#include <tuple>
 
 #include "galileo_inav_page_parts.h"
 #include "gnss_time.h"
@@ -79,7 +80,7 @@ private:
     };
 
 private:
-    using Key = std::pair<int32_t, int32_t>;
+    using Key = std::tuple<int32_t, int32_t, int32_t>;
 
     static constexpr double PARTIAL_TIMEOUT_S = 240.0;
     static constexpr double COMPLETE_LIFETIME_S = 600.0;
@@ -93,6 +94,13 @@ private:
 
 private:
     static PageHeader ExtractPageHeader(const GalileoInavPageParts& page);
+
+    static GnssTime MakeSubframeTime(const GnssTime& time);
+
+    static Key MakeCedKey(int32_t prn,
+        const GnssTime& time);
+
+    static Key MakeTimingKey(int32_t prn);
 
     static bool IsSupportedWordType(int32_t wt);
 

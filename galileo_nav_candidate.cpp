@@ -111,38 +111,31 @@ bool GalileoNavCandidateStore::FeedCedPage(const GalileoInavPageParts& page,
     const PageHeader& header,
     AuthReason& reason_out)
 {
-    const Key key(page.prn, header.iod);
+    /*
+        ADKD=0/12 CED is assembled per PRN and 30-second I/NAV
+        subframe, following public OSNMA implementations.
+
+        Do not group by parsed IODnav/TOE here. The authenticated CED
+        message is the concatenation of WT1..WT5 authenticated bit ranges
+        from the same I/NAV subframe. Parsing IODnav from a fixed bit offset
+        in every word was wrong and prevented WT2..WT5 from joining WT1.
+    */
+    const GnssTime subframe_time =
+        MakeSubframeTime(page.page_epoch);
+
+    const Key key =
+        MakeCedKey(page.prn,
+            subframe_time);
 
     auto it = candidates_.find(key);
 
     if (it == candidates_.end())
     {
-        if (header.wt != GAL_WT1)
-        {
-            static int32_t ced_reject_debug_count = 0;
-
-            if (ced_reject_debug_count < 120)
-            {
-                printf("NAVDATA rejected: prn=%d wt=%d iod=%d toe=%d wn=%d tow=%.0f reason=no WT1 candidate with same iod\n",
-                    page.prn,
-                    header.wt,
-                    header.iod,
-                    header.toe,
-                    page.page_epoch.wn,
-                    page.page_epoch.tow);
-
-                ++ced_reject_debug_count;
-            }
-
-            reason_out = AuthReason::WaitingForMoreFrames;
-            return false;
-        }
-
         GalileoNavCandidate candidate{};
         candidate.prn = page.prn;
         candidate.iod = header.iod;
         candidate.toe = header.toe;
-        candidate.creation_time = page.page_epoch;
+        candidate.creation_time = subframe_time;
         candidate.last_update_time = page.page_epoch;
 
         StoreWord(candidate, page, header.wt);
@@ -157,42 +150,16 @@ bool GalileoNavCandidateStore::FeedCedPage(const GalileoInavPageParts& page,
 
     GalileoNavCandidate& candidate = it->second;
 
-    if (!CanAcceptCedWord(candidate, header.wt))
-    {
-        static int32_t ced_order_debug_count = 0;
-
-        if (ced_order_debug_count < 120)
-        {
-            printf("NAVDATA rejected: prn=%d wt=%d iod=%d toe=%d wn=%d tow=%.0f reason=bad sequence have1=%d have2=%d have3=%d have4=%d have5=%d\n",
-                page.prn,
-                header.wt,
-                header.iod,
-                header.toe,
-                page.page_epoch.wn,
-                page.page_epoch.tow,
-                candidate.HasWord(GAL_WT1) ? 1 : 0,
-                candidate.HasWord(GAL_WT2) ? 1 : 0,
-                candidate.HasWord(GAL_WT3) ? 1 : 0,
-                candidate.HasWord(GAL_WT4) ? 1 : 0,
-                candidate.HasWord(GAL_WT5) ? 1 : 0);
-
-            ++ced_order_debug_count;
-        }
-
-        reason_out = AuthReason::WaitingForMoreFrames;
-        return false;
-    }
-
     if (candidate.HasWord(header.wt))
     {
-        reason_out = AuthReason::WaitingForMoreFrames;
-        return false;
-    }
-
-    if (candidate.toe >= 0 && header.toe >= 0 && candidate.toe != header.toe)
-    {
-        reason_out = AuthReason::TimeInconsistency;
-        return false;
+        /*
+            A repeated WT in the same 30 s subframe replaces the previous
+            copy. This is safer than rejecting the whole candidate, and it
+            avoids stale partial candidates when a receiver provides repeated
+            or corrected pages.
+        */
+        ClearWord(candidate,
+            header.wt);
     }
 
     StoreWord(candidate, page, header.wt);
@@ -208,7 +175,7 @@ bool GalileoNavCandidateStore::FeedTimingPage(const GalileoInavPageParts& page,
     const PageHeader& header,
     AuthReason& reason_out)
 {
-    const Key key(page.prn, -1);
+    const Key key = MakeTimingKey(page.prn);
 
     auto it = candidates_.find(key);
 
@@ -311,68 +278,127 @@ GalileoNavCandidateStore::FindComplete(int32_t prn,
     int32_t iod,
     const GnssTime& now) const
 {
+    (void)iod;
+
     if (prn <= 0)
         return nullptr;
 
     if (!IsTimeValid(now))
         return nullptr;
 
-    if (iod >= 0)
+    /*
+        For ADKD=0/12, 'now' is the requested CED subframe time.
+        Prefer an exact PRN + 30 s subframe lookup.
+    */
+    const GnssTime subframe_time =
+        MakeSubframeTime(now);
+
+    const Key key =
+        MakeCedKey(prn,
+            subframe_time);
+
+    auto it = candidates_.find(key);
+
+    if (it == candidates_.end())
     {
-        const Key key(prn, iod);
+        static int32_t find_missing_key_debug_count = 0;
 
-        auto it = candidates_.find(key);
-
-        if (it == candidates_.end())
-            return nullptr;
-
-        const GalileoNavCandidate& candidate = it->second;
-
-        if (!candidate.HasCedData())
-            return nullptr;
-
-        if (IsExpired(candidate, now))
-            return nullptr;
-
-        return &candidate;
-    }
-
-    const GalileoNavCandidate* best = nullptr;
-
-    for (const auto& kv : candidates_)
-    {
-        const GalileoNavCandidate& candidate = kv.second;
-
-        if (candidate.prn != prn)
-            continue;
-
-        if (!candidate.HasCedData())
-            continue;
-
-        if (IsExpired(candidate, now))
-            continue;
-
-        if (best == nullptr)
+        if (find_missing_key_debug_count < 120)
         {
-            best = &candidate;
-            continue;
+            printf("NAVDATA find failed: prn=%d wn=%d tow=%.0f subframe_tow=%.0f reason=no exact candidate. same_prn_candidates=",
+                prn,
+                now.wn,
+                now.tow,
+                subframe_time.tow);
+
+            int32_t printed = 0;
+
+            for (const auto& kv : candidates_)
+            {
+                const Key& candidate_key = kv.first;
+
+                const int32_t cand_prn =
+                    std::get<0>(candidate_key);
+
+                const int32_t cand_wn =
+                    std::get<1>(candidate_key);
+
+                const int32_t cand_tow =
+                    std::get<2>(candidate_key);
+
+                if (cand_prn == prn && printed < 12)
+                {
+                    const GalileoNavCandidate& c =
+                        kv.second;
+
+                    printf(" [%d/%d ced=%d w1=%d w2=%d w3=%d w4=%d w5=%d]",
+                        cand_wn,
+                        cand_tow,
+                        c.HasCedData() ? 1 : 0,
+                        c.HasWord(GAL_WT1) ? 1 : 0,
+                        c.HasWord(GAL_WT2) ? 1 : 0,
+                        c.HasWord(GAL_WT3) ? 1 : 0,
+                        c.HasWord(GAL_WT4) ? 1 : 0,
+                        c.HasWord(GAL_WT5) ? 1 : 0);
+
+                    ++printed;
+                }
+            }
+
+            printf("\n");
+
+            ++find_missing_key_debug_count;
         }
 
-        const double candidate_age =
-            DiffSeconds(now, candidate.last_update_time);
-
-        const double best_age =
-            DiffSeconds(now, best->last_update_time);
-
-        if (candidate_age >= 0.0 &&
-            best_age >= 0.0 &&
-            candidate_age < best_age)
-        {
-            best = &candidate;
-        }
+        return nullptr;
     }
 
-    return best;
+    const GalileoNavCandidate& candidate = it->second;
+
+    if (!candidate.HasCedData())
+    {
+        static int32_t find_incomplete_debug_count = 0;
+
+        if (find_incomplete_debug_count < 80)
+        {
+            printf("NAVDATA find failed: prn=%d wn=%d tow=%.0f subframe_tow=%.0f reason=incomplete w1=%d w2=%d w3=%d w4=%d w5=%d\n",
+                prn,
+                now.wn,
+                now.tow,
+                subframe_time.tow,
+                candidate.HasWord(GAL_WT1) ? 1 : 0,
+                candidate.HasWord(GAL_WT2) ? 1 : 0,
+                candidate.HasWord(GAL_WT3) ? 1 : 0,
+                candidate.HasWord(GAL_WT4) ? 1 : 0,
+                candidate.HasWord(GAL_WT5) ? 1 : 0);
+
+            ++find_incomplete_debug_count;
+        }
+
+        return nullptr;
+    }
+
+    if (IsExpired(candidate, now))
+    {
+        static int32_t find_expired_debug_count = 0;
+
+        if (find_expired_debug_count < 40)
+        {
+            printf("NAVDATA find failed: prn=%d wn=%d tow=%.0f subframe_tow=%.0f reason=expired creation_tow=%.0f last_tow=%.0f\n",
+                prn,
+                now.wn,
+                now.tow,
+                subframe_time.tow,
+                candidate.creation_time.tow,
+                candidate.last_update_time.tow);
+
+            ++find_expired_debug_count;
+        }
+
+        return nullptr;
+    }
+
+    return &candidate;
 }
 
 const GalileoNavCandidate*
@@ -388,7 +414,7 @@ GalileoNavCandidateStore::FindForAdkd(int32_t prn,
 
     if (adkd == OsnmaAdkd::InavTiming)
     {
-        const Key key(prn, -1);
+        const Key key = MakeTimingKey(prn);
 
         auto it = candidates_.find(key);
 
@@ -470,6 +496,42 @@ GalileoNavCandidateStore::ExtractPageHeader(const GalileoInavPageParts& page)
     return header;
 }
 
+GnssTime GalileoNavCandidateStore::MakeSubframeTime(const GnssTime& time)
+{
+    GnssTime out = time;
+
+    if (!IsTimeValid(out))
+        return out;
+
+    int32_t tow_s =
+        static_cast<int32_t>(out.tow);
+
+    tow_s = (tow_s / 30) * 30;
+
+    out.tow = static_cast<double>(tow_s);
+    return out;
+}
+
+GalileoNavCandidateStore::Key
+GalileoNavCandidateStore::MakeCedKey(int32_t prn,
+    const GnssTime& time)
+{
+    const GnssTime subframe_time =
+        MakeSubframeTime(time);
+
+    return Key(prn,
+        subframe_time.wn,
+        static_cast<int32_t>(subframe_time.tow));
+}
+
+GalileoNavCandidateStore::Key
+GalileoNavCandidateStore::MakeTimingKey(int32_t prn)
+{
+    return Key(prn,
+        -1,
+        -1);
+}
+
 bool GalileoNavCandidateStore::IsSupportedWordType(int32_t wt)
 {
     return (wt >= GAL_WT1 && wt <= GAL_WT6) ||
@@ -479,26 +541,8 @@ bool GalileoNavCandidateStore::IsSupportedWordType(int32_t wt)
 bool GalileoNavCandidateStore::CanAcceptCedWord(const GalileoNavCandidate& candidate,
     int32_t wt)
 {
-    switch (wt)
-    {
-    case GAL_WT1:
-        return false;
-
-    case GAL_WT2:
-        return candidate.HasWord(GAL_WT1);
-
-    case GAL_WT3:
-        return candidate.HasWord(GAL_WT2);
-
-    case GAL_WT4:
-        return candidate.HasWord(GAL_WT3);
-
-    case GAL_WT5:
-        return candidate.HasWord(GAL_WT4);
-
-    default:
-        return false;
-    }
+    (void)candidate;
+    return wt >= GAL_WT1 && wt <= GAL_WT5;
 }
 
 bool GalileoNavCandidateStore::IsExpired(const GalileoNavCandidate& candidate,
@@ -559,13 +603,17 @@ void GalileoNavCandidateStore::StoreWord(GalileoNavCandidate& candidate,
             candidate.HasWord(GAL_WT6) &&
             candidate.HasWord(GAL_WT10);
 
-        printf("NAVDATA stored: prn=%d iod=%d toe=%d wt=%d wn=%d tow=%.0f has_ced=%d has_timing=%d\n",
+        const GnssTime subframe_time =
+            MakeSubframeTime(page.page_epoch);
+
+        printf("NAVDATA stored: prn=%d iod=%d toe=%d wt=%d wn=%d tow=%.0f subframe_tow=%.0f has_ced=%d has_timing=%d\n",
             candidate.prn,
             candidate.iod,
             candidate.toe,
             wt,
             page.page_epoch.wn,
             page.page_epoch.tow,
+            subframe_time.tow,
             has_ced_now ? 1 : 0,
             has_timing_now ? 1 : 0);
 

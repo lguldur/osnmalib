@@ -8,6 +8,44 @@
 #include "osnma_crypto.h"
 #include "osnma_mac_lookup.h"
 
+namespace
+{
+    GnssTime AddSecondsNormalized(const GnssTime& time,
+        double seconds)
+    {
+        GnssTime out = time;
+
+        out.tow += seconds;
+
+        while (out.tow < 0.0)
+        {
+            --out.wn;
+            out.tow += 604800.0;
+        }
+
+        while (out.tow >= 604800.0)
+        {
+            ++out.wn;
+            out.tow -= 604800.0;
+        }
+
+        return out;
+    }
+
+    GnssTime NavDataLookupTime(const GnssTime& mack_time,
+        OsnmaAdkd adkd)
+    {
+        if (adkd == OsnmaAdkd::InavCed ||
+            adkd == OsnmaAdkd::SlowMac)
+        {
+            return AddSecondsNormalized(mack_time,
+                -30.0);
+        }
+
+        return mack_time;
+    }
+}
+
 OsnmaMacVerifier::Result
 OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
     const GalileoNavCandidateStore& nav_store,
@@ -83,10 +121,14 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
         result.debug_has_key = false;
         result.debug_has_mac_input = false;
 
+        const GnssTime tag0_nav_time =
+            NavDataLookupTime(mack.subframe_epoch,
+                OsnmaAdkd::InavCed);
+
         const GalileoNavCandidate* tag0_candidate =
             nav_store.FindForAdkd(mack.prn,
                 OsnmaAdkd::InavCed,
-                now);
+                tag0_nav_time);
 
         result.debug_has_nav = (tag0_candidate != nullptr);
 
@@ -104,8 +146,8 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
                     0,
                     mack.subframe_epoch.wn,
                     mack.subframe_epoch.tow,
-                    now.wn,
-                    now.tow);
+                    tag0_nav_time.wn,
+                    tag0_nav_time.tow);
 
                 ++tag0_missing_nav_debug_count;
             }
@@ -199,10 +241,14 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
         result.debug_has_key = false;
         result.debug_has_mac_input = false;
 
+        const GnssTime tag_nav_time =
+            NavDataLookupTime(mack.subframe_epoch,
+                tag.adkd);
+
         const GalileoNavCandidate* candidate =
             nav_store.FindForAdkd(tag.prnd,
                 tag.adkd,
-                now);
+                tag_nav_time);
 
         result.debug_has_nav = (candidate != nullptr);
 
@@ -221,8 +267,8 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
                     tag.cop,
                     mack.subframe_epoch.wn,
                     mack.subframe_epoch.tow,
-                    now.wn,
-                    now.tow);
+                    tag_nav_time.wn,
+                    tag_nav_time.tow);
 
                 ++tag_missing_nav_debug_count;
             }
