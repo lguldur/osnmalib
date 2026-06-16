@@ -493,7 +493,7 @@ namespace
         tag_mack.tag_size_bytes = 5;
 
         tag_mack.total_tag_count = 6;
-        tag_mack.tag_info_count = 0;
+        tag_mack.tag_info_count = 5;
 
         tag_mack.cop = 1;
 
@@ -541,6 +541,17 @@ namespace
         macseq_input.push_back(0x11u);
         macseq_input.push_back(0xC1u);
 
+        /*
+            The debug BuildMacseqInput() variant now includes all 5 Tag-Info
+            fields. The self-test only sets the first one; the remaining 4 are zero.
+        */
+        
+        for (int32_t i = 0; i < 4; ++i)
+        {
+            macseq_input.push_back(0x00u);
+            macseq_input.push_back(0x00u);
+        }
+        
         std::uint8_t computed[2]{};
 
         /*

@@ -1,6 +1,7 @@
 #include "osnma_mac_verifier.h"
 
 #include <array>
+#include <cstdio>
 #include <vector>
 
 #include "osnma_bit_utils.h"
@@ -325,6 +326,32 @@ OsnmaMacVerifier::VerifyMacseq(const OsnmaMackMessage& mack,
     /*
         MACSEQ is the first 12 bits of the MAC output.
     */
+    const int32_t computed_macseq =
+        (static_cast<int32_t>(computed[0]) << 4) |
+        ((static_cast<int32_t>(computed[1]) >> 4) & 0x0F);
+
+    static int32_t macseq_debug_count = 0;
+
+    if (macseq_debug_count < 20)
+    {
+        printf("MACSEQ debug: prn=%d wn=%d tow=%.0f macseq_rx=%d macseq_calc=%d input_size=%d key_size=%d key_first=%02X input=",
+            mack.prn,
+            mack.subframe_epoch.wn,
+            mack.subframe_epoch.tow,
+            mack.macseq,
+            computed_macseq,
+            static_cast<int32_t>(macseq_input.size()),
+            key_size_bytes,
+            key_size_bytes > 0 ? key[0] : 0);
+
+        for (size_t i = 0; i < macseq_input.size(); ++i)
+            printf("%02X", macseq_input[i]);
+
+        printf("\n");
+
+        ++macseq_debug_count;
+    }
+
     const std::uint8_t expected0 =
         static_cast<std::uint8_t>((mack.macseq >> 4) & 0xFF);
 
@@ -344,6 +371,8 @@ bool OsnmaMacVerifier::BuildMacseqInput(const OsnmaMackMessage& mack,
     int32_t maclt,
     std::vector<std::uint8_t>& out)
 {
+    (void)maclt;
+
     out.clear();
 
     if (!mack.valid_layout)
@@ -355,7 +384,13 @@ bool OsnmaMacVerifier::BuildMacseqInput(const OsnmaMackMessage& mack,
     if (!IsTimeValid(mack.subframe_epoch))
         return false;
 
-    out.reserve(5 + 2 * OsnmaMackMessage::MAX_TAGS);
+    if (mack.tag_info_count < 0 ||
+        mack.tag_info_count > OsnmaMackMessage::MAX_TAGS)
+    {
+        return false;
+    }
+
+    out.reserve(5 + 2 * mack.tag_info_count);
 
     out.push_back(static_cast<std::uint8_t>(mack.prn));
 
@@ -363,35 +398,39 @@ bool OsnmaMacVerifier::BuildMacseqInput(const OsnmaMackMessage& mack,
         out);
 
     /*
-        For each FLX slot selected by MACLT/GST row, append the corresponding
-        raw 16-bit Tag-Info field.
+        Test variant for MACSEQ debugging.
 
-        Important: use the raw bits from the MACK message, not the decoded
-        ADKD enum, because FLX can legally contain values that are not fixed
-        by the MACLT table.
+        MACSEQ input is built from:
+
+            PRNA || GST_SF || all received raw 16-bit Tag-Info fields
+
+        Do not filter by valid_info, ADKD, PRND, COP, or MACLT here.
+        The previous implementation only appended MACLT/Flexible-selected
+        Tag-Info fields, which produced variable input sizes such as 7 or
+        9 bytes. For KS=128 and TS=40 the parsed MACK geometry contains
+        five Tag-Info fields, so this variant should produce:
+
+            1 + 4 + 5 * 2 = 15 bytes
+
+        Important: use the raw bits from the received MACK message, not the
+        decoded enum values. This preserves reserved/dummy values exactly as
+        transmitted.
     */
-    for (int32_t tag_number = 1;
-        tag_number < mack.total_tag_count;
-        ++tag_number)
+    const int32_t mack_header_bits =
+        mack.tag_size_bits + 12 + 4;
+
+    const int32_t tag_and_info_bits =
+        mack.tag_size_bits + 16;
+
+    if (mack_header_bits <= 0 || tag_and_info_bits <= 0)
+        return false;
+
+    for (int32_t i = 0; i < mack.tag_info_count; ++i)
     {
-        OsnmaMacLookupSlot slot{};
-
-        if (!OsnmaMacLookupTable::GetExpectedSlot(maclt,
-            mack.subframe_epoch,
-            tag_number,
-            slot))
-        {
-            return false;
-        }
-
-        if (slot.target != OsnmaMacTagAuthTarget::Flexible)
-            continue;
-
-        const int32_t tag_and_info_bits =
-            mack.tag_size_bits + 16;
-
         const int32_t tag_info_start =
-            tag_number * tag_and_info_bits + mack.tag_size_bits;
+            mack_header_bits +
+            i * tag_and_info_bits +
+            mack.tag_size_bits;
 
         if ((tag_info_start + 16) > OsnmaMackMessage::MACK_BITS)
             return false;
