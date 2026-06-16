@@ -44,6 +44,8 @@ struct OsnmaDsmMessage
     int32_t prn = -1;
     GnssTime last_subframe_epoch{};
 
+    OsnmaNmaHeader nma_header{};
+
     OsnmaDsmType type = OsnmaDsmType::Unknown;
     int32_t dsm_id = -1;
 

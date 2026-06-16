@@ -102,16 +102,28 @@ namespace
         const std::uint8_t* signature,
         int32_t signature_size_bytes)
     {
+        printf("ECDSA raw verify input: group_id=%d pk_size=%d pk_first=%02X "
+            "hash_size=%d sig_size=%d\n",
+            static_cast<int32_t>(group_id),
+            public_key_size_bytes,
+            public_key_size_bytes > 0 && public_key != nullptr ? public_key[0] : 0,
+            hash_size_bytes,
+            signature_size_bytes);
+
         if (!IsValidBuffer(public_key, public_key_size_bytes) ||
             !IsValidBuffer(signature, signature_size_bytes) ||
             hash == nullptr ||
             hash_size_bytes <= 0)
         {
+            printf("ECDSA raw verify failed: invalid input buffer\n");
             return false;
         }
 
         if ((signature_size_bytes % 2) != 0)
+        {
+            printf("ECDSA raw verify failed: odd signature size\n");
             return false;
+        }
 
         const int32_t scalar_size = signature_size_bytes / 2;
 
@@ -129,8 +141,13 @@ namespace
 
         do
         {
-            if (mbedtls_ecp_group_load(&grp, group_id) != 0)
+            int rc = mbedtls_ecp_group_load(&grp, group_id);
+
+            if (rc != 0)
+            {
+                printf("ECDSA raw verify failed: mbedtls_ecp_group_load rc=%d\n", rc);
                 break;
+            }
 
             /*
                 Expected public key format:
@@ -140,42 +157,66 @@ namespace
                     P-256 uncompressed: 65 bytes, 0x04 || X || Y
                     P-521 uncompressed: 133 bytes, 0x04 || X || Y
 
-                If OSNMA gives compressed keys, decompression must be added here.
+                OSNMA/GSC currently gives P-256 compressed keys:
+                    33 bytes, 0x02/0x03 || X
+
+                If this printf shows pk_size=33 pk_first=02 or 03,
+                and mbedtls_ecp_point_read_binary fails, then we need
+                compressed-point decompression.
             */
-            if (mbedtls_ecp_point_read_binary(
+            rc = mbedtls_ecp_point_read_binary(
                 &grp,
                 &q,
                 reinterpret_cast<const unsigned char*>(public_key),
-                static_cast<size_t>(public_key_size_bytes)) != 0)
+                static_cast<size_t>(public_key_size_bytes));
+
+            if (rc != 0)
             {
+                printf("ECDSA raw verify failed: mbedtls_ecp_point_read_binary rc=%d "
+                    "pk_size=%d pk_first=%02X\n",
+                    rc,
+                    public_key_size_bytes,
+                    public_key_size_bytes > 0 ? public_key[0] : 0);
                 break;
             }
 
-            if (mbedtls_mpi_read_binary(
+            rc = mbedtls_mpi_read_binary(
                 &r,
                 reinterpret_cast<const unsigned char*>(signature),
-                static_cast<size_t>(scalar_size)) != 0)
+                static_cast<size_t>(scalar_size));
+
+            if (rc != 0)
             {
+                printf("ECDSA raw verify failed: mbedtls_mpi_read_binary r rc=%d\n", rc);
                 break;
             }
 
-            if (mbedtls_mpi_read_binary(
+            rc = mbedtls_mpi_read_binary(
                 &s,
                 reinterpret_cast<const unsigned char*>(signature + scalar_size),
-                static_cast<size_t>(scalar_size)) != 0)
+                static_cast<size_t>(scalar_size));
+
+            if (rc != 0)
             {
+                printf("ECDSA raw verify failed: mbedtls_mpi_read_binary s rc=%d\n", rc);
                 break;
             }
 
-            const int rc =
-                mbedtls_ecdsa_verify(&grp,
-                    hash,
-                    static_cast<size_t>(hash_size_bytes),
-                    &q,
-                    &r,
-                    &s);
+            rc = mbedtls_ecdsa_verify(&grp,
+                hash,
+                static_cast<size_t>(hash_size_bytes),
+                &q,
+                &r,
+                &s);
 
-            ok = (rc == 0);
+            if (rc != 0)
+            {
+                printf("ECDSA raw verify failed: mbedtls_ecdsa_verify rc=%d\n", rc);
+                break;
+            }
+
+            printf("ECDSA raw verify OK\n");
+            ok = true;
         } while (false);
 
         mbedtls_mpi_free(&s);

@@ -134,6 +134,7 @@ bool OsnmaDsmAssembler::BuildIfComplete(SatState& sat,
 
     message_out.prn = latest_block.prn;
     message_out.last_subframe_epoch = latest_block.subframe_epoch;
+    message_out.nma_header = sat.blocks[0].nma_header;
     message_out.type = sat.type;
     message_out.dsm_id = sat.dsm_id;
     message_out.block_count = expected_blocks;

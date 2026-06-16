@@ -39,6 +39,8 @@ enum class OsnmaNewPublicKeyType : int32_t
 
 struct OsnmaDsmKroot
 {
+    std::uint8_t nma_header = 0;
+
     int32_t number_of_blocks = -1;
     int32_t public_key_id = -1;
     int32_t kroot_chain_id = -1;

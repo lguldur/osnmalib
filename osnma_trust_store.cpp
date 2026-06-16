@@ -55,7 +55,7 @@ bool OsnmaTrustStore::AddPkr(const OsnmaDsmPkr& pkr,
 }
 
 bool OsnmaTrustStore::AddKroot(const OsnmaDsmKroot& kroot,
-                               const GnssTime& time)
+    const GnssTime& time)
 {
     const int32_t idx = FindFreeKrootSlot();
 
@@ -63,23 +63,36 @@ bool OsnmaTrustStore::AddKroot(const OsnmaDsmKroot& kroot,
 
     const OsnmaDsmPkr* public_key = GetTrustedPublicKey();
 
+    printf("AddKroot: kroot_pkid=%d trusted_public_key=%d",
+        kroot.public_key_id,
+        public_key != nullptr ? 1 : 0);
+
+    if (public_key != nullptr)
+    {
+        printf(" npkid=%d npkt=%d pk_bytes=%d pk_first=%02X",
+            public_key->new_public_key_id,
+            static_cast<int32_t>(public_key->new_public_key_type),
+            public_key->public_key_size_bytes,
+            public_key->public_key_size_bytes > 0 ? public_key->public_key[0] : 0);
+    }
+
+    printf("\n");
+
     if (public_key != nullptr)
     {
         AuthReason reason = AuthReason::None;
         verified = kroot_verifier_.Verify(kroot, *public_key, reason);
+
+        printf("AddKroot result: kroot_pkid=%d verified=%d reason=%d\n",
+            kroot.public_key_id,
+            verified ? 1 : 0,
+            static_cast<int32_t>(reason));
     }
 
     kroot_list_[idx].valid = true;
     kroot_list_[idx].signature_verified = verified;
     kroot_list_[idx].time = time;
     kroot_list_[idx].kroot = kroot;
-
-    /*printf("AddKroot verify: PKID=%d msg_len=%d sig_len=%d key_found=%d\n",
-        kroot.public_key_id,
-        signed_message_len,
-        signature_len,
-        public_key != nullptr ? 1 : 0);
-        */
 
     return verified;
 }

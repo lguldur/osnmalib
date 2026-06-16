@@ -162,6 +162,8 @@ bool OsnmaDsmContentDecoder::DecodeKroot(const OsnmaDsmMessage& message,
     const int32_t size = message.byte_count;
 
     OsnmaDsmKroot out{};
+    
+    out.nma_header = message.nma_header.raw;
 
     if (size > OsnmaDsmKroot::MAX_RAW_BYTES)
     {

@@ -483,6 +483,19 @@ OsnmaEngine::VerifyPendingMacks(const OsnmaDsmKroot& trusted_kroot,
             mac_result.reason == AuthReason::InvalidFrameFormat)
         {
             ++statistics_.pending_macks_terminal_failed;
+
+            /*printf("TAG terminal failed: "
+                "mack_prn=%d tag_index=%d ctr=%d prnd=%d adkd=%d "
+                "mack_tow=%d key_tow=%d has_nav=%d\n",
+                pending.mack.prn,
+                tag.index,
+                tag.index + 1,
+                tag.prnd,
+                static_cast<int32_t>(tag.adkd),
+                pending.mack.subframe_epoch.tow,
+                disclosed_key_time.tow,
+                has_nav_data ? 1 : 0);*/
+
             RemovePendingMack(i);
             result.reason = mac_result.reason;
         }
