@@ -93,8 +93,7 @@ bool OsnmaMacInputBuilder::BuildTag0Message(const OsnmaMackMessage& mack,
     const std::uint8_t prna =
         static_cast<std::uint8_t>(mack.prn);
 
-    return BuildCommonMessage(prna,
-        prna,
+    return BuildTag0CommonMessage(prna,
         GstSf32(mack.subframe_epoch),
         1,
         nmas,
@@ -102,6 +101,48 @@ bool OsnmaMacInputBuilder::BuildTag0Message(const OsnmaMackMessage& mack,
         false,
         candidate,
         out);
+}
+
+bool OsnmaMacInputBuilder::BuildTag0CommonMessage(std::uint8_t prna,
+    std::uint32_t gst_sf,
+    std::uint8_t ctr,
+    std::uint8_t nmas,
+    OsnmaAdkd adkd,
+    bool dummy_tag,
+    const GalileoNavCandidate& candidate,
+    std::vector<std::uint8_t>& out)
+{
+    out.clear();
+
+    if (prna == 0)
+        return false;
+
+    BitWriter writer{};
+
+    /*
+        Tag0 message:
+            PRNA || GST_SF || CTR || NMAS || navdata || P
+
+        No PRND byte for Tag0.
+    */
+
+    writer.AppendBits(static_cast<std::uint32_t>(prna), 8);
+    writer.AppendBits(gst_sf, 32);
+    writer.AppendBits(static_cast<std::uint32_t>(ctr), 8);
+    writer.AppendBits(static_cast<std::uint32_t>(nmas & 0x03u), 2);
+
+    if (!BuildNavData(candidate,
+        adkd,
+        dummy_tag,
+        writer))
+    {
+        return false;
+    }
+
+    writer.PadToByte();
+
+    out = writer.Bytes();
+    return !out.empty();
 }
 
 bool OsnmaMacInputBuilder::BuildTagMessage(const OsnmaMackMessage& mack,

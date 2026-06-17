@@ -44,6 +44,29 @@ namespace
 
         return mack_time;
     }
+
+    void PrintHexPrefix(const char* label,
+        const std::uint8_t* data,
+        int32_t size_bytes,
+        int32_t max_bytes)
+    {
+        printf("%s", label);
+
+        if (data == nullptr || size_bytes <= 0 || max_bytes <= 0)
+        {
+            printf("-");
+            return;
+        }
+
+        const int32_t n =
+            (size_bytes < max_bytes) ? size_bytes : max_bytes;
+
+        for (int32_t i = 0; i < n; ++i)
+            printf("%02X", data[i]);
+
+        if (size_bytes > n)
+            printf("...");
+    }
 }
 
 OsnmaMacVerifier::Result
@@ -216,6 +239,55 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
                         result.reason = AuthReason::None;
                         return result;
                     }
+
+                    static int32_t tag0_mismatch_debug_count = 0;
+
+                    if (tag0_mismatch_debug_count < 40)
+                    {
+                        const double nav_age_s =
+                            DiffSeconds(tag0_nav_time,
+                                tag0_candidate->creation_time);
+
+                        printf("TAG MAC mismatch: stage=2 prna=%d prnd=%d adkd=%d ctr=%d tag_index=%d cop=%d "
+                            "mack_wn=%d mack_tow=%.0f requested_tow=%.0f selected_tow=%.0f nav_age_s=%.0f "
+                            "key_first=%02X mac_input_size=%d ",
+                            mack.prn,
+                            mack.prn,
+                            static_cast<int32_t>(OsnmaAdkd::InavCed),
+                            1,
+                            0,
+                            mack.cop,
+                            mack.subframe_epoch.wn,
+                            mack.subframe_epoch.tow,
+                            tag0_nav_time.tow,
+                            tag0_candidate->creation_time.tow,
+                            nav_age_s,
+                            key_size_bytes > 0 ? key[0] : 0,
+                            static_cast<int32_t>(mac_input.size()));
+
+                        PrintHexPrefix("rx=",
+                            mack.tag0.data(),
+                            mack.tag_size_bytes,
+                            mack.tag_size_bytes);
+
+                        printf(" ");
+
+                        PrintHexPrefix("calc=",
+                            computed.data(),
+                            mack.tag_size_bytes,
+                            mack.tag_size_bytes);
+
+                        printf(" ");
+
+                        PrintHexPrefix("input=",
+                            mac_input.data(),
+                            static_cast<int32_t>(mac_input.size()),
+                            48);
+
+                        printf("\n");
+
+                        ++tag0_mismatch_debug_count;
+                    }
                 }
             }
         }
@@ -330,6 +402,55 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
             result.state = AuthState::Yes;
             result.reason = AuthReason::None;
             return result;
+        }
+
+        static int32_t tag_mismatch_debug_count = 0;
+
+        if (tag_mismatch_debug_count < 160)
+        {
+            const double nav_age_s =
+                DiffSeconds(tag_nav_time,
+                    candidate->creation_time);
+
+            printf("TAG MAC mismatch: stage=3 prna=%d prnd=%d adkd=%d ctr=%d tag_index=%d cop=%d "
+                "mack_wn=%d mack_tow=%.0f requested_tow=%.0f selected_tow=%.0f nav_age_s=%.0f "
+                "key_first=%02X mac_input_size=%d ",
+                mack.prn,
+                tag.prnd,
+                static_cast<int32_t>(tag.adkd),
+                tag.index + 1,
+                tag.index,
+                tag.cop,
+                mack.subframe_epoch.wn,
+                mack.subframe_epoch.tow,
+                tag_nav_time.tow,
+                candidate->creation_time.tow,
+                nav_age_s,
+                key_size_bytes > 0 ? key[0] : 0,
+                static_cast<int32_t>(mac_input.size()));
+
+            PrintHexPrefix("rx=",
+                tag.tag.data(),
+                tag.tag_size_bytes,
+                tag.tag_size_bytes);
+
+            printf(" ");
+
+            PrintHexPrefix("calc=",
+                computed.data(),
+                tag.tag_size_bytes,
+                tag.tag_size_bytes);
+
+            printf(" ");
+
+            PrintHexPrefix("input=",
+                mac_input.data(),
+                static_cast<int32_t>(mac_input.size()),
+                48);
+
+            printf("\n");
+
+            ++tag_mismatch_debug_count;
         }
     }
 

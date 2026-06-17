@@ -360,6 +360,8 @@ GalileoNavCandidateStore::FindComplete(int32_t prn,
     int32_t best_tow = 0;
     double best_age_s = 0.0;
 
+    static constexpr double MAX_CED_FALLBACK_AGE_S = 60.0;
+
     for (const auto& kv : candidates_)
     {
         const Key& candidate_key =
@@ -397,6 +399,9 @@ GalileoNavCandidateStore::FindComplete(int32_t prn,
             DiffSeconds(subframe_time, candidate_time);
 
         if (age_s < 0.0)
+            continue;
+
+        if (age_s > MAX_CED_FALLBACK_AGE_S)
             continue;
 
         if (best_candidate == nullptr || age_s < best_age_s)

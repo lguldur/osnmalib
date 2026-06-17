@@ -547,6 +547,52 @@ OsnmaSelfTest::Result OsnmaSelfTest::RunAll()
     return result;
 }
 
+static bool CheckTag0Header(const std::vector<std::uint8_t>& msg,
+    std::uint8_t expected_prna,
+    std::uint8_t expected_ctr,
+    std::uint8_t expected_nmas)
+{
+    if (msg.size() < 7)
+        return false;
+
+    const std::uint32_t gst =
+        MakeGstSf32(MakeTestTime());
+
+    if (msg[0] != expected_prna)
+        return false;
+
+    if (msg[1] != static_cast<std::uint8_t>((gst >> 24) & 0xFFu))
+        return false;
+
+    if (msg[2] != static_cast<std::uint8_t>((gst >> 16) & 0xFFu))
+        return false;
+
+    if (msg[3] != static_cast<std::uint8_t>((gst >> 8) & 0xFFu))
+        return false;
+
+    if (msg[4] != static_cast<std::uint8_t>(gst & 0xFFu))
+        return false;
+
+    if (msg[5] != expected_ctr)
+        return false;
+
+    /*
+        Tag0 header:
+            PRNA   8 bits
+            GST_SF 32 bits
+            CTR    8 bits
+
+        NMAS starts at byte 6, bits 7..6.
+    */
+    const std::uint8_t nmas_high =
+        static_cast<std::uint8_t>((expected_nmas & 0x03u) << 6);
+
+    if ((msg[6] & 0xC0u) != nmas_high)
+        return false;
+
+    return true;
+}
+
 bool OsnmaSelfTest::TestTag0Adkd0LengthAndHeader(Result& result)
 {
     ++result.test_count;
@@ -569,14 +615,14 @@ bool OsnmaSelfTest::TestTag0Adkd0LengthAndHeader(Result& result)
         return false;
 
     if (!Check(result,
-        msg.size() == 76,
-        "Tag0 ADKD0 message size is not 76 bytes"))
+        msg.size() == 75,
+        "Tag0 ADKD0 message size is not 75 bytes"))
     {
         return false;
     }
 
     if (!Check(result,
-        CheckHeader(msg, 7, 7, 1, 2),
+        CheckTag0Header(msg, 7, 1, 2),
         "Tag0 ADKD0 header mismatch"))
     {
         return false;

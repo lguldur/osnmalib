@@ -15,6 +15,15 @@ public:
         std::uint8_t nmas,
         std::vector<std::uint8_t>& out);
 
+    static bool BuildTag0CommonMessage(std::uint8_t prna,
+        std::uint32_t gst_sf,
+        std::uint8_t ctr,
+        std::uint8_t nmas,
+        OsnmaAdkd adkd,
+        bool dummy_tag,
+        const GalileoNavCandidate& candidate,
+        std::vector<std::uint8_t>& out);
+
     static bool BuildTagMessage(const OsnmaMackMessage& mack,
         const OsnmaMackTagInfo& tag,
         const GalileoNavCandidate& candidate,
