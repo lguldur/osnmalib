@@ -124,6 +124,9 @@ private:
         std::uint8_t* dst,
         int32_t dst_bit_count);
 
+    static bool CopyOfficialCsvInavWord(const std::uint8_t* raw_240b,
+        std::uint8_t* dst_128b);
+
     static bool GetBitMsb0(const std::uint8_t* data,
         int32_t bit_index);
 

@@ -355,23 +355,30 @@ bool OsnmaOfficialTestVectorReader::DecodePage(const SatelliteStream& stream,
         return false;
     }
 
-    const int32_t even_offset = raw_to_word_bit_offset;
-    
+    /*
+        Daniel Estevez's official test-vector bridge does not take a
+        contiguous 128-bit slice from the 240-bit CSV page. It builds the
+        Galileo INAV word exactly like this:
+
+            contents = page[2 .. 2 + 112] || page[122 .. 122 + 16]
+
+        The OSNMA field is still taken from the odd page part below. The old
+        contiguous extraction happened to work for HKROOT/MACK because those
+        bits are in the OSNMA reserved field, but it corrupted the INAV CED
+        words used for ADKD0/4/12 tag verification.
+    */
+    if (!CopyOfficialCsvInavWord(page_out.raw_240b.data(),
+        page_out.even_128b.data()))
+    {
+        return false;
+    }
+
     const int32_t odd_offset =
         (raw_to_word_bit_offset == 0)
         ? RAW_HALF_BITS
         : RAW_HALF_BITS - 1;
     
     const int32_t odd_bit_count = RAW_PAGE_BITS - odd_offset;
-
-    if (!CopyBitsMsb0Shifted(page_out.raw_240b.data(),
-        even_offset,
-        RAW_PAGE_BITS,
-        page_out.even_128b.data(),
-        OSNMA_WORD_BITS))
-    {
-        return false;
-    }
 
     if (odd_bit_count <= 0 || odd_bit_count > OSNMA_WORD_BITS)
         return false;
@@ -447,6 +454,26 @@ bool OsnmaOfficialTestVectorReader::CopyBitsMsb0Shifted(const std::uint8_t* src,
 
     for (int32_t i = 0; i < dst_bit_count; ++i)
         SetBitMsb0(dst, i, GetBitMsb0(src, src_bit_offset + i));
+
+    return true;
+}
+
+bool OsnmaOfficialTestVectorReader::CopyOfficialCsvInavWord(const std::uint8_t* raw_240b,
+    std::uint8_t* dst_128b)
+{
+    if (raw_240b == nullptr || dst_128b == nullptr)
+        return false;
+
+    for (int32_t i = 0; i < OSNMA_WORD_BYTES; ++i)
+        dst_128b[i] = 0;
+
+    // Daniel's osnma-test-vectors-to-galmon conversion:
+    //   page[2..114] followed by page[122..138].
+    for (int32_t i = 0; i < 112; ++i)
+        SetBitMsb0(dst_128b, i, GetBitMsb0(raw_240b, 2 + i));
+
+    for (int32_t i = 0; i < 16; ++i)
+        SetBitMsb0(dst_128b, 112 + i, GetBitMsb0(raw_240b, 122 + i));
 
     return true;
 }
