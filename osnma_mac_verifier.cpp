@@ -41,6 +41,7 @@ namespace
         OsnmaAdkd adkd)
     {
         if (adkd == OsnmaAdkd::InavCed ||
+            adkd == OsnmaAdkd::InavTiming ||
             adkd == OsnmaAdkd::SlowMac)
         {
             return AddSecondsNormalized(mack_time,

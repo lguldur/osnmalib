@@ -96,6 +96,41 @@ bool GalileoNavCandidate::IsCedCopEligible(int32_t cop) const
     return (max_age + 1) <= cop;
 }
 
+int32_t GalileoNavCandidate::MaxTimingWordAge() const
+{
+    if (!HasTimingData())
+        return INVALID_WORD_AGE;
+
+    if (word_age[GAL_WT6] == INVALID_WORD_AGE ||
+        word_age[GAL_WT10] == INVALID_WORD_AGE)
+    {
+        return INVALID_WORD_AGE;
+    }
+
+    return word_age[GAL_WT6] > word_age[GAL_WT10] ?
+        word_age[GAL_WT6] : word_age[GAL_WT10];
+}
+
+bool GalileoNavCandidate::IsTimingCopEligible(int32_t cop) const
+{
+    if (cop <= 0)
+        return false;
+
+    const int32_t max_age = MaxTimingWordAge();
+
+    if (max_age == INVALID_WORD_AGE)
+        return false;
+
+    /*
+        Same rule as CED/status and Daniel's TimingParameters store:
+
+            max_age().saturating_add(1) <= COP
+
+        Ages are in 30 s subframes.
+    */
+    return (max_age + 1) <= cop;
+}
+
 void GalileoNavCandidateStore::Reset()
 {
     candidates_.clear();
@@ -227,89 +262,67 @@ bool GalileoNavCandidateStore::FeedTimingPage(const GalileoInavPageParts& page,
     const PageHeader& header,
     AuthReason& reason_out)
 {
-    const Key key = MakeTimingKey(page.prn);
+    /*
+        Daniel-like ADKD=4 timing storage.
+
+        Timing parameters are also rolling navigation data. They must be
+        stored by PRN and subframe GST, copied from subframe to subframe,
+        and checked with the same COP age rule used by Daniel:
+
+            max(WT6 age, WT10 age) + 1 <= COP
+
+        The previous implementation kept one latest WT6/WT10 pair per PRN.
+        Configuration 2 exposed the problem: very old WT6/WT10 data was used
+        hundreds or thousands of seconds later, producing ADKD=4 tag mismatch
+        diagnostics even though the MACK contained other valid tags.
+    */
+    const GnssTime subframe_time =
+        MakeSubframeTimeForPageEpoch(page.page_epoch);
+
+    const Key key =
+        MakeCedKeyFromSubframeTime(page.prn,
+            subframe_time);
 
     auto it = candidates_.find(key);
 
     if (it == candidates_.end())
     {
-        GalileoNavCandidate candidate{};
-        InitializeWordAges(candidate);
-        candidate.prn = page.prn;
-        candidate.iod = -1;
-        candidate.toe = -1;
-        candidate.creation_time = page.page_epoch;
+        GalileoNavCandidate candidate =
+            MakeRollingCedCandidate(page.prn,
+                header,
+                subframe_time,
+                page.page_epoch);
+
+        StoreWord(candidate,
+            page,
+            header.wt);
+
         candidate.last_update_time = page.page_epoch;
+        candidate.complete = candidate.IsComplete();
 
-        if (header.wt == GAL_WT6)
-        {
-            StoreWord(candidate, page, header.wt);
-            candidates_[key] = candidate;
+        candidates_[key] = candidate;
 
-            reason_out = AuthReason::None;
-            return true;
-        }
-
-        // WT10 is accepted only after WT6.
-        reason_out = AuthReason::WaitingForMoreFrames;
-        return false;
+        reason_out = AuthReason::None;
+        return true;
     }
 
     GalileoNavCandidate& candidate = it->second;
 
-    if (header.wt == GAL_WT6)
+    if (candidate.HasWord(header.wt))
     {
-        /*
-            WT6 anchors an ADKD=4 timing pair.
-            A new WT6 invalidates any old WT10 to avoid mixing generations.
-        */
-        StoreWord(candidate, page, GAL_WT6);
-        ClearWord(candidate, GAL_WT10);
-
-        candidate.last_update_time = page.page_epoch;
-
-        reason_out = AuthReason::None;
-        return true;
+        ClearWord(candidate,
+            header.wt);
     }
 
-    if (header.wt == GAL_WT10)
-    {
-        /*
-            WT10 must belong to the current WT6-anchored timing pair.
-        */
-        if (!candidate.HasWord(GAL_WT6))
-        {
-            reason_out = AuthReason::WaitingForMoreFrames;
-            return false;
-        }
+    StoreWord(candidate,
+        page,
+        header.wt);
 
-        const GalileoNavWord& wt6 = candidate.words[GAL_WT6];
+    candidate.last_update_time = page.page_epoch;
+    candidate.complete = candidate.IsComplete();
 
-        if (!wt6.has_epoch || !IsTimeValid(wt6.page_epoch))
-        {
-            reason_out = AuthReason::InvalidTime;
-            return false;
-        }
-
-        const double dt_s =
-            DiffSeconds(page.page_epoch, wt6.page_epoch);
-
-        if (dt_s < 0.0 || dt_s > TIMING_PAIR_MAX_SPAN_S)
-        {
-            reason_out = AuthReason::TimeInconsistency;
-            return false;
-        }
-
-        StoreWord(candidate, page, GAL_WT10);
-
-        candidate.last_update_time = page.page_epoch;
-
-        reason_out = AuthReason::None;
-        return true;
-    }
-
-    reason_out = AuthReason::UnsupportedMessage;
-    return false;
+    reason_out = AuthReason::None;
+    return true;
 }
 
 void GalileoNavCandidateStore::Cleanup(const GnssTime& now)
@@ -506,7 +519,16 @@ GalileoNavCandidateStore::FindForAdkd(int32_t prn,
 
     if (adkd == OsnmaAdkd::InavTiming)
     {
-        const Key key = MakeTimingKey(prn);
+        /*
+            Daniel-like ADKD=4 lookup: use the exact rolling timing state at
+            the requested navigation-message GST, and apply the COP age rule.
+        */
+        const GnssTime subframe_time =
+            MakeSubframeTimeForRequest(now);
+
+        const Key key =
+            MakeCedKeyFromSubframeTime(prn,
+                subframe_time);
 
         auto it = candidates_.find(key);
 
@@ -521,7 +543,7 @@ GalileoNavCandidateStore::FindForAdkd(int32_t prn,
         if (!IsValidTimingPair(candidate))
             return nullptr;
 
-        if (IsExpired(candidate, now))
+        if (!candidate.IsTimingCopEligible(cop))
             return nullptr;
 
         return &candidate;
@@ -789,8 +811,14 @@ GalileoNavCandidate GalileoNavCandidateStore::MakeRollingCedCandidate(int32_t pr
             SubframeDistance30s(subframe_time,
                 previous->creation_time);
 
+        const int32_t effective_steps =
+            steps > 0 ? steps : 1;
+
         IncreaseCedWordAges(candidate,
-            steps > 0 ? steps : 1);
+            effective_steps);
+
+        IncreaseTimingWordAges(candidate,
+            effective_steps);
     }
 
     candidate.prn = prn;
@@ -870,6 +898,34 @@ void GalileoNavCandidateStore::IncreaseCedWordAges(GalileoNavCandidate& candidat
 
     for (int32_t wt = GAL_WT1; wt <= GAL_WT5; ++wt)
     {
+        if (!candidate.HasWord(wt))
+        {
+            candidate.word_age[wt] = GalileoNavCandidate::INVALID_WORD_AGE;
+            continue;
+        }
+
+        if (candidate.word_age[wt] == GalileoNavCandidate::INVALID_WORD_AGE)
+            continue;
+
+        if (candidate.word_age[wt] > 1000000)
+            continue;
+
+        candidate.word_age[wt] += subframe_steps;
+    }
+}
+
+void GalileoNavCandidateStore::IncreaseTimingWordAges(GalileoNavCandidate& candidate,
+    int32_t subframe_steps)
+{
+    if (subframe_steps <= 0)
+        return;
+
+    const int32_t timing_words[2] = { GAL_WT6, GAL_WT10 };
+
+    for (int32_t i = 0; i < 2; ++i)
+    {
+        const int32_t wt = timing_words[i];
+
         if (!candidate.HasWord(wt))
         {
             candidate.word_age[wt] = GalileoNavCandidate::INVALID_WORD_AGE;

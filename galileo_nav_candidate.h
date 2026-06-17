@@ -66,6 +66,9 @@ struct GalileoNavCandidate
     bool IsComplete() const;
     int32_t MaxCedWordAge() const;
     bool IsCedCopEligible(int32_t cop) const;
+
+    int32_t MaxTimingWordAge() const;
+    bool IsTimingCopEligible(int32_t cop) const;
 };
 
 class GalileoNavCandidateStore
@@ -155,6 +158,9 @@ private:
     static void InitializeWordAges(GalileoNavCandidate& candidate);
 
     static void IncreaseCedWordAges(GalileoNavCandidate& candidate,
+        int32_t subframe_steps);
+
+    static void IncreaseTimingWordAges(GalileoNavCandidate& candidate,
         int32_t subframe_steps);
 
     static bool IsValidTimingPair(const GalileoNavCandidate& candidate);
