@@ -354,7 +354,12 @@ bool OsnmaOfficialTestVectorReader::DecodePage(const SatelliteStream& stream,
     }
 
     const int32_t even_offset = raw_to_word_bit_offset;
-    const int32_t odd_offset = RAW_HALF_BITS - 1;
+    
+    const int32_t odd_offset =
+        (raw_to_word_bit_offset == 0)
+        ? RAW_HALF_BITS
+        : RAW_HALF_BITS - 1;
+    
     const int32_t odd_bit_count = RAW_PAGE_BITS - odd_offset;
 
     if (!CopyBitsMsb0Shifted(page_out.raw_240b.data(),

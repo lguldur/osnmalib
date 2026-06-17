@@ -67,6 +67,82 @@ namespace
         if (size_bytes > n)
             printf("...");
     }
+
+    bool IsGalileoPrn(int32_t prn)
+    {
+        return prn >= 1 && prn <= 36;
+    }
+
+    bool MakeEffectiveMacltTag(const OsnmaMackMessage& mack,
+        int32_t maclt,
+        const OsnmaMackTagInfo& raw_tag,
+        OsnmaMackTagInfo& effective_tag,
+        OsnmaMacLookupSlot& expected_slot)
+    {
+        effective_tag = raw_tag;
+        expected_slot = OsnmaMacLookupSlot{};
+
+        if (!mack.valid_layout)
+            return false;
+
+        if (raw_tag.index <= 0)
+            return false;
+
+        if (!OsnmaMacLookupTable::GetExpectedSlot(maclt,
+            mack.subframe_epoch,
+            raw_tag.index,
+            expected_slot))
+        {
+            return false;
+        }
+
+        if (expected_slot.target == OsnmaMacTagAuthTarget::Flexible)
+        {
+            if (!raw_tag.valid_info)
+                return false;
+
+            if (raw_tag.adkd == OsnmaAdkd::Reserved)
+                return false;
+
+            if (!IsGalileoPrn(raw_tag.prnd))
+                return false;
+
+            return true;
+        }
+
+        /*
+            Fixed MACLT slots define the ADKD. Do not trust the raw ADKD
+            nibble carried in the Tag-Info field for these slots.
+
+            For self-authentication slots, the authenticated satellite is the
+            transmitting PRNA. For external slots, the PRND is still taken from
+            the Tag-Info field.
+        */
+        effective_tag.adkd = expected_slot.adkd;
+
+        if (expected_slot.target == OsnmaMacTagAuthTarget::Self)
+        {
+            if (!IsGalileoPrn(mack.prn))
+                return false;
+
+            effective_tag.prnd = mack.prn;
+            return true;
+        }
+
+        if (expected_slot.target == OsnmaMacTagAuthTarget::External)
+        {
+            if (!IsGalileoPrn(raw_tag.prnd))
+                return false;
+
+            if (raw_tag.prnd == mack.prn)
+                return false;
+
+            effective_tag.prnd = raw_tag.prnd;
+            return true;
+        }
+
+        return false;
+    }
 }
 
 OsnmaMacVerifier::Result
@@ -295,13 +371,29 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
 
     /*
         Then verify Tag-Info entries.
+
+        For fixed MACLT slots, build an effective tag descriptor first. The
+        fixed slot defines ADKD, and self-authentication slots define PRND=PRNA.
+        Only FLX slots use the received ADKD from Tag-Info.
     */
+    const int32_t maclt =
+        tesla_chain.GetMacLookupTable();
+
     for (int32_t i = 0; i < mack.tag_info_count; ++i)
     {
-        const OsnmaMackTagInfo& tag = mack.tag_info[i];
+        const OsnmaMackTagInfo& raw_tag = mack.tag_info[i];
 
-        if (!tag.valid_info)
+        OsnmaMackTagInfo tag{};
+        OsnmaMacLookupSlot expected_slot{};
+
+        if (!MakeEffectiveMacltTag(mack,
+            maclt,
+            raw_tag,
+            tag,
+            expected_slot))
+        {
             continue;
+        }
 
         result.debug_stage = 3;
         result.debug_tag_index = tag.index;
@@ -330,13 +422,15 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
 
             if (tag_missing_nav_debug_count < 80)
             {
-                printf("NAVDATA lookup failed: stage=3 prna=%d prnd=%d adkd=%d ctr=%d tag_index=%d tag_cop=%d mack_wn=%d mack_tow=%.0f requested_wn=%d requested_tow=%.0f\n",
+                printf("NAVDATA lookup failed: stage=3 prna=%d prnd=%d adkd=%d ctr=%d tag_index=%d tag_cop=%d raw_prnd=%d raw_adkd=%d mack_wn=%d mack_tow=%.0f requested_wn=%d requested_tow=%.0f\n",
                     mack.prn,
                     tag.prnd,
                     static_cast<int32_t>(tag.adkd),
                     tag.index + 1,
                     tag.index,
                     tag.cop,
+                    raw_tag.prnd,
+                    static_cast<int32_t>(raw_tag.adkd),
                     mack.subframe_epoch.wn,
                     mack.subframe_epoch.tow,
                     tag_nav_time.wn,
@@ -412,7 +506,7 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
                 DiffSeconds(tag_nav_time,
                     candidate->creation_time);
 
-            printf("TAG MAC mismatch: stage=3 prna=%d prnd=%d adkd=%d ctr=%d tag_index=%d cop=%d "
+            printf("TAG MAC mismatch: stage=3 prna=%d prnd=%d adkd=%d ctr=%d tag_index=%d cop=%d raw_prnd=%d raw_adkd=%d "
                 "mack_wn=%d mack_tow=%.0f requested_tow=%.0f selected_tow=%.0f nav_age_s=%.0f "
                 "key_first=%02X mac_input_size=%d ",
                 mack.prn,
@@ -421,6 +515,8 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
                 tag.index + 1,
                 tag.index,
                 tag.cop,
+                raw_tag.prnd,
+                static_cast<int32_t>(raw_tag.adkd),
                 mack.subframe_epoch.wn,
                 mack.subframe_epoch.tow,
                 tag_nav_time.tow,
