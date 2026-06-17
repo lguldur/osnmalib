@@ -500,6 +500,78 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
 
                                 printf("\n");
                             }
+
+
+                            /*
+                                Diagnostic only: try nearby ADKD0 CED extraction
+                                variants. This does not change authentication;
+                                it only tells us if the remaining mismatch is a
+                                one-bit CED mask/word-range problem.
+                            */
+                            for (int32_t first_delta = -2; first_delta <= 2; ++first_delta)
+                            {
+                                for (int32_t wt3_count = 120; wt3_count <= 122; wt3_count += 2)
+                                {
+                                    for (int32_t wt5_count = 66; wt5_count <= 68; ++wt5_count)
+                                    {
+                                        std::vector<std::uint8_t> ced_variant_input;
+
+                                        if (!OsnmaMacInputBuilder::DebugBuildTag0Adkd0Ranges(mack,
+                                            *tag0_candidate,
+                                            nmas,
+                                            first_delta,
+                                            wt3_count,
+                                            wt5_count,
+                                            ced_variant_input))
+                                        {
+                                            continue;
+                                        }
+
+                                        std::array<std::uint8_t, OsnmaMackTagInfo::MAX_TAG_BYTES> ced_variant_computed{};
+
+                                        if (!ComputeMac(mac_function,
+                                            key,
+                                            key_size_bytes,
+                                            ced_variant_input.data(),
+                                            static_cast<int32_t>(ced_variant_input.size()),
+                                            ced_variant_computed.data(),
+                                            mack.tag_size_bytes))
+                                        {
+                                            continue;
+                                        }
+
+                                        const bool ced_variant_match =
+                                            ConstantTimeEqual(ced_variant_computed.data(),
+                                                mack.tag0.data(),
+                                                mack.tag_size_bytes);
+
+                                        printf("TAG0 CED variant: prna=%d mack_tow=%.0f first_delta=%d wt3_bits=%d wt5_bits=%d input_size=%d match=%d calc=",
+                                            mack.prn,
+                                            mack.subframe_epoch.tow,
+                                            first_delta,
+                                            wt3_count,
+                                            wt5_count,
+                                            static_cast<int32_t>(ced_variant_input.size()),
+                                            ced_variant_match ? 1 : 0);
+
+                                        PrintHexPrefix("",
+                                            ced_variant_computed.data(),
+                                            mack.tag_size_bytes,
+                                            mack.tag_size_bytes);
+
+                                        if (ced_variant_match)
+                                        {
+                                            printf(" input=");
+                                            PrintHexPrefix("",
+                                                ced_variant_input.data(),
+                                                static_cast<int32_t>(ced_variant_input.size()),
+                                                static_cast<int32_t>(ced_variant_input.size()));
+                                        }
+
+                                        printf("\\n");
+                                    }
+                                }
+                            }
                         }
 
                         ++tag0_mismatch_debug_count;

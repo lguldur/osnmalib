@@ -30,6 +30,14 @@ public:
         std::uint8_t nmas,
         std::vector<std::uint8_t>& out);
 
+    static bool DebugBuildTag0Adkd0Ranges(const OsnmaMackMessage& mack,
+        const GalileoNavCandidate& candidate,
+        std::uint8_t nmas,
+        int32_t common_first_bit_delta,
+        int32_t wt3_bit_count,
+        int32_t wt5_bit_count,
+        std::vector<std::uint8_t>& out);
+
 private:
     struct NavDataRange
     {
