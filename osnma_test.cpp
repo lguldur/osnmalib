@@ -12,7 +12,8 @@
 
 // -tv "D:\data\osnma\Test_vectors" > d:\data\osnma\out.txt
 // -tv "D:\data\osnma\Test_vectors" configuration_1 16_AUG_2023_GST_05_00_01.csv > d:\data\osnma\out.txt
-// -json D:\data\osnma\week_1397_24h.jsonl D:\data\osnma\OSNMA_MerkleTree_20251210100000_newPKID_2.xml D:\data\osnma\OSNMA_PublicKey_20251210100000_newPKID_2.xml
+// -json D:\data\osnma\week_1397_1h.jsonl D:\data\osnma\OSNMA_MerkleTree_20251210100000_newPKID_2.xml D:\data\osnma\OSNMA_PublicKey_20251210100000_newPKID_2.xml > d:\data\osnma\jsonout.txt
+// -json D:\data\osnma\week_1397_24h.jsonl D:\data\osnma\OSNMA_MerkleTree_20251210100000_newPKID_2.xml D:\data\osnma\OSNMA_PublicKey_20251210100000_newPKID_2.xml > d:\data\osnma\jsonout.txt
 
 static void PrintUsage(const char* exe_name)
 {
