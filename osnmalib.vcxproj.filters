@@ -27,6 +27,7 @@
     <ClInclude Include="osnma_mac_lookup.h" />
     <ClInclude Include="osnma_self_test.h" />
     <ClInclude Include="osnma_raw_json_reader.h" />
+    <ClInclude Include="osnma_official_test_vector_reader.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="osnma_authenticator.cpp" />
@@ -49,5 +50,6 @@
     <ClCompile Include="osnma_mac_lookup.cpp" />
     <ClCompile Include="osnma_self_test.cpp" />
     <ClCompile Include="osnma_raw_json_reader.cpp" />
+    <ClCompile Include="osnma_official_test_vector_reader.cpp" />
   </ItemGroup>
 </Project>

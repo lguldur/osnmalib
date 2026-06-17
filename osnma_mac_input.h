@@ -43,6 +43,9 @@ private:
     public:
         void AppendBits(std::uint32_t value, int32_t bit_count);
         void AppendBytesMsb0(const std::uint8_t* data, int32_t bit_count);
+        void AppendBitsMsb0(const std::uint8_t* data,
+            int32_t first_bit,
+            int32_t bit_count);
         void AppendZeroBits(int32_t bit_count);
         void PadToByte();
 

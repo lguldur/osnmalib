@@ -32,11 +32,38 @@ void OsnmaMacInputBuilder::BitWriter::AppendBits(std::uint32_t value,
 void OsnmaMacInputBuilder::BitWriter::AppendBytesMsb0(const std::uint8_t* data,
     int32_t bit_count)
 {
-    if (data == nullptr || bit_count <= 0)
+    AppendBitsMsb0(data,
+        0,
+        bit_count);
+}
+
+void OsnmaMacInputBuilder::BitWriter::AppendBitsMsb0(const std::uint8_t* data,
+    int32_t first_bit,
+    int32_t bit_count)
+{
+    if (data == nullptr || first_bit < 0 || bit_count <= 0)
         return;
 
+    /*
+        Append bits directly into the current bit stream.
+
+        This intentionally does not align to the next byte. For OSNMA tag
+        messages, navigation data starts immediately after the 2-bit NMAS
+        field:
+
+            PRN(A/D) || GST_SF || CTR || NMAS || navdata || zero padding
+
+        ADKD0 ranges such as WT3[6..128) and WT5[6..73) are therefore
+        appended with their exact bit length. No intermediate byte-padding
+        bits are inserted between words.
+    */
     for (int32_t i = 0; i < bit_count; ++i)
-        AppendBits(GetBitMsb0(data, i) ? 1u : 0u, 1);
+    {
+        const bool bit =
+            GetBitMsb0(data, first_bit + i);
+
+        AppendBits(bit ? 1u : 0u, 1);
+    }
 }
 
 void OsnmaMacInputBuilder::BitWriter::AppendZeroBits(int32_t bit_count)
@@ -378,13 +405,9 @@ bool OsnmaMacInputBuilder::AppendRange(const GalileoNavCandidate& candidate,
         return true;
     }
 
-    for (int32_t i = 0; i < range.bit_count; ++i)
-    {
-        const bool bit =
-            GetBitMsb0(word.even.data(), range.first_bit + i);
-
-        writer.AppendBits(bit ? 1u : 0u, 1);
-    }
+    writer.AppendBitsMsb0(word.even.data(),
+        range.first_bit,
+        range.bit_count);
 
     return true;
 }
