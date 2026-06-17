@@ -650,6 +650,20 @@ OsnmaEngine::ProcessMacksForDisclosedKey(const OsnmaDsmKroot& trusted_kroot,
             continue;
         }
 
+        if (mac_result.reason == AuthReason::MackVerificationFailed &&
+            mac_result.debug_stage == 1)
+        {
+            /*
+                Daniel only processes tags for MACKs that pass MACSEQ/MACLT
+                consistency. MACK-like blocks that fail at this stage are not
+                navigation-data authentication failures; keep them separate
+                from terminal tag failures and do not spam the normal log.
+            */
+            ++statistics_.pending_macks_skipped_macseq;
+            RemovePendingMack(i);
+            continue;
+        }
+
         if (mac_result.reason == AuthReason::MackVerificationFailed ||
             mac_result.reason == AuthReason::UnsupportedMessage ||
             mac_result.reason == AuthReason::InvalidFrameFormat)
@@ -657,11 +671,6 @@ OsnmaEngine::ProcessMacksForDisclosedKey(const OsnmaDsmKroot& trusted_kroot,
             ++statistics_.pending_macks_terminal_failed;
 
             if (mac_result.reason == AuthReason::MackVerificationFailed &&
-                mac_result.debug_stage == 1)
-            {
-                ++statistics_.pending_macks_skipped_macseq;
-            }
-            else if (mac_result.reason == AuthReason::MackVerificationFailed &&
                 (mac_result.debug_stage == 2 || mac_result.debug_stage == 3))
             {
                 ++statistics_.pending_macks_failed_tag;
