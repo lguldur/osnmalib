@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <map>
+#include <limits>
 #include <tuple>
 
 #include "galileo_inav_page_parts.h"
@@ -44,12 +45,27 @@ struct GalileoNavCandidate
 
     bool complete = false;
 
+    /*
+        Daniel-Estevez-style rolling CED age, in 30 s subframes.
+
+        For ADKD=0/12, the CED state is copied from one subframe to the
+        next. Each WT1..WT5 range carries its own age. A word received in
+        the current subframe has age 0; a copied word from the previous
+        subframe has age 1, etc. COP is checked by the verifier as:
+
+            max_word_age + 1 <= COP
+    */
+    static constexpr int32_t INVALID_WORD_AGE = std::numeric_limits<int32_t>::max();
+    std::array<int32_t, GAL_MAX_WT + 1> word_age{};
+
     std::array<GalileoNavWord, GAL_MAX_WT + 1> words{};
 
     bool HasWord(int32_t wt) const;
     bool HasCedData() const;
     bool HasTimingData() const;
     bool IsComplete() const;
+    int32_t MaxCedWordAge() const;
+    bool IsCedCopEligible(int32_t cop) const;
 };
 
 class GalileoNavCandidateStore
@@ -67,11 +83,13 @@ public:
 
     const GalileoNavCandidate* FindComplete(int32_t prn,
         int32_t iod,
-        const GnssTime& now) const;
+        const GnssTime& now,
+        int32_t cop) const;
 
     const GalileoNavCandidate* FindForAdkd(int32_t prn,
         OsnmaAdkd adkd,
-        const GnssTime& now) const;
+        const GnssTime& now,
+        int32_t cop) const;
 
 private:
     struct PageHeader
@@ -122,6 +140,22 @@ private:
 
     static void ClearWord(GalileoNavCandidate& candidate,
         int32_t wt);
+
+    GalileoNavCandidate MakeRollingCedCandidate(int32_t prn,
+        const PageHeader& header,
+        const GnssTime& subframe_time,
+        const GnssTime& page_epoch) const;
+
+    const GalileoNavCandidate* FindNewestCedBefore(int32_t prn,
+        const GnssTime& subframe_time) const;
+
+    static int32_t SubframeDistance30s(const GnssTime& newer,
+        const GnssTime& older);
+
+    static void InitializeWordAges(GalileoNavCandidate& candidate);
+
+    static void IncreaseCedWordAges(GalileoNavCandidate& candidate,
+        int32_t subframe_steps);
 
     static bool IsValidTimingPair(const GalileoNavCandidate& candidate);
 

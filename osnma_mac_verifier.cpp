@@ -237,7 +237,8 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
         const GalileoNavCandidate* tag0_candidate =
             nav_store.FindForAdkd(mack.prn,
                 OsnmaAdkd::InavCed,
-                tag0_nav_time);
+                tag0_nav_time,
+                mack.cop);
 
         result.debug_has_nav = (tag0_candidate != nullptr);
 
@@ -624,7 +625,8 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
         const GalileoNavCandidate* candidate =
             nav_store.FindForAdkd(tag.prnd,
                 tag.adkd,
-                tag_nav_time);
+                tag_nav_time,
+                tag.cop);
 
         result.debug_has_nav = (candidate != nullptr);
 
