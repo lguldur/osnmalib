@@ -363,6 +363,17 @@ GalileoNavCandidateStore::FindComplete(int32_t prn,
                 ++find_expired_debug_count;
             }
         }
+
+        /*
+            Important: if the requested subframe candidate exists but is not
+            usable, do not fall back to an older CED candidate.  Falling back
+            converts a temporary/structural missing-WT condition into a hard
+            MAC failure with stale navdata, which hides the real problem.
+
+            If no candidate exists at all for the requested subframe, the code
+            below still allows the Daniel-style previous-complete fallback.
+        */
+        return nullptr;
     }
 
     const GalileoNavCandidate* best_candidate = nullptr;

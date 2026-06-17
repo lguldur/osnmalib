@@ -68,6 +68,16 @@ namespace
             printf("...");
     }
 
+    void PrintHexFull(const char* label,
+        const std::uint8_t* data,
+        int32_t size_bytes)
+    {
+        PrintHexPrefix(label,
+            data,
+            size_bytes,
+            size_bytes);
+    }
+
     bool IsGalileoPrn(int32_t prn)
     {
         return prn >= 1 && prn <= 36;
@@ -326,7 +336,7 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
 
                         printf("TAG MAC mismatch: stage=2 prna=%d prnd=%d adkd=%d ctr=%d tag_index=%d cop=%d "
                             "mack_wn=%d mack_tow=%.0f requested_tow=%.0f selected_tow=%.0f nav_age_s=%.0f "
-                            "key_first=%02X mac_input_size=%d ",
+                            "nmas=%u key_first=%02X mac_input_size=%d ",
                             mack.prn,
                             mack.prn,
                             static_cast<int32_t>(OsnmaAdkd::InavCed),
@@ -338,6 +348,7 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
                             tag0_nav_time.tow,
                             tag0_candidate->creation_time.tow,
                             nav_age_s,
+                            static_cast<unsigned int>(nmas & 0x03u),
                             key_size_bytes > 0 ? key[0] : 0,
                             static_cast<int32_t>(mac_input.size()));
 
@@ -355,10 +366,15 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
 
                         printf(" ");
 
-                        PrintHexPrefix("input=",
+                        PrintHexFull("key=",
+                            key,
+                            key_size_bytes);
+
+                        printf(" ");
+
+                        PrintHexFull("input=",
                             mac_input.data(),
-                            static_cast<int32_t>(mac_input.size()),
-                            48);
+                            static_cast<int32_t>(mac_input.size()));
 
                         printf("\n");
 
@@ -508,7 +524,7 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
 
             printf("TAG MAC mismatch: stage=3 prna=%d prnd=%d adkd=%d ctr=%d tag_index=%d cop=%d raw_prnd=%d raw_adkd=%d "
                 "mack_wn=%d mack_tow=%.0f requested_tow=%.0f selected_tow=%.0f nav_age_s=%.0f "
-                "key_first=%02X mac_input_size=%d ",
+                "nmas=%u key_first=%02X mac_input_size=%d ",
                 mack.prn,
                 tag.prnd,
                 static_cast<int32_t>(tag.adkd),
@@ -522,6 +538,7 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
                 tag_nav_time.tow,
                 candidate->creation_time.tow,
                 nav_age_s,
+                static_cast<unsigned int>(nmas & 0x03u),
                 key_size_bytes > 0 ? key[0] : 0,
                 static_cast<int32_t>(mac_input.size()));
 
@@ -539,10 +556,15 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
 
             printf(" ");
 
-            PrintHexPrefix("input=",
+            PrintHexFull("key=",
+                key,
+                key_size_bytes);
+
+            printf(" ");
+
+            PrintHexFull("input=",
                 mac_input.data(),
-                static_cast<int32_t>(mac_input.size()),
-                48);
+                static_cast<int32_t>(mac_input.size()));
 
             printf("\n");
 
