@@ -32,6 +32,12 @@ public:
         const std::uint8_t*& key,
         int32_t& key_size_bytes) const;
 
+    int32_t DebugComputeKeyIndexForTag(const OsnmaMackMessage& mack,
+        const OsnmaMackTagInfo& tag) const;
+
+    bool DebugGetKeyByIndex(int32_t key_index,
+        const std::uint8_t*& key,
+        int32_t& key_size_bytes) const;
 
     bool HasKey(int32_t key_index) const;
 

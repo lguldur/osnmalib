@@ -441,6 +441,65 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
                                     printf("\n");
                                 }
                             }
+
+                            const int32_t nominal_key_index =
+                                tesla_chain.DebugComputeKeyIndexForTag(mack,
+                                    tag0_info);
+
+                            printf("TAG0 nominal key: prna=%d mack_tow=%.0f key_index=%d key_first=%02X\n",
+                                mack.prn,
+                                mack.subframe_epoch.tow,
+                                nominal_key_index,
+                                key_size_bytes > 0 ? key[0] : 0);
+
+                            for (int32_t key_delta = -6; key_delta <= 6; ++key_delta)
+                            {
+                                const int32_t test_key_index =
+                                    nominal_key_index + key_delta;
+
+                                const std::uint8_t* variant_key = nullptr;
+                                int32_t variant_key_size_bytes = 0;
+
+                                if (!tesla_chain.DebugGetKeyByIndex(test_key_index,
+                                    variant_key,
+                                    variant_key_size_bytes))
+                                {
+                                    continue;
+                                }
+
+                                std::array<std::uint8_t, OsnmaMackTagInfo::MAX_TAG_BYTES> key_variant_computed{};
+
+                                if (!ComputeMac(mac_function,
+                                    variant_key,
+                                    variant_key_size_bytes,
+                                    mac_input.data(),
+                                    static_cast<int32_t>(mac_input.size()),
+                                    key_variant_computed.data(),
+                                    mack.tag_size_bytes))
+                                {
+                                    continue;
+                                }
+
+                                const bool key_variant_match =
+                                    ConstantTimeEqual(key_variant_computed.data(),
+                                        mack.tag0.data(),
+                                        mack.tag_size_bytes);
+
+                                printf("TAG0 key variant: prna=%d mack_tow=%.0f key_delta=%d key_index=%d first=%02X match=%d calc=",
+                                    mack.prn,
+                                    mack.subframe_epoch.tow,
+                                    key_delta,
+                                    test_key_index,
+                                    variant_key_size_bytes > 0 ? variant_key[0] : 0,
+                                    key_variant_match ? 1 : 0);
+
+                                PrintHexPrefix("",
+                                    key_variant_computed.data(),
+                                    mack.tag_size_bytes,
+                                    mack.tag_size_bytes);
+
+                                printf("\n");
+                            }
                         }
 
                         ++tag0_mismatch_debug_count;
