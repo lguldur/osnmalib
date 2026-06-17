@@ -378,6 +378,71 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
 
                         printf("\n");
 
+                        /*
+                            Diagnostic only: test the two most likely
+                            non-CED causes without accepting the result:
+                                - wrong 2-bit NMAS value
+                                - wrong GST_SF epoch by one subframe
+
+                            If one of these variants matches the received
+                            Tag0, the remaining bug is immediately localized.
+                        */
+                        if (tag0_mismatch_debug_count < 6)
+                        {
+                            for (int32_t tow_delta = -30; tow_delta <= 30; tow_delta += 30)
+                            {
+                                for (int32_t nmas_variant = 0; nmas_variant < 4; ++nmas_variant)
+                                {
+                                    OsnmaMackMessage variant_mack = mack;
+                                    variant_mack.subframe_epoch =
+                                        AddSecondsNormalized(mack.subframe_epoch,
+                                            static_cast<double>(tow_delta));
+
+                                    std::vector<std::uint8_t> variant_input;
+
+                                    if (!OsnmaMacInputBuilder::BuildTag0Message(variant_mack,
+                                        *tag0_candidate,
+                                        static_cast<std::uint8_t>(nmas_variant),
+                                        variant_input))
+                                    {
+                                        continue;
+                                    }
+
+                                    std::array<std::uint8_t, OsnmaMackTagInfo::MAX_TAG_BYTES> variant_computed{};
+
+                                    if (!ComputeMac(mac_function,
+                                        key,
+                                        key_size_bytes,
+                                        variant_input.data(),
+                                        static_cast<int32_t>(variant_input.size()),
+                                        variant_computed.data(),
+                                        mack.tag_size_bytes))
+                                    {
+                                        continue;
+                                    }
+
+                                    const bool variant_match =
+                                        ConstantTimeEqual(variant_computed.data(),
+                                            mack.tag0.data(),
+                                            mack.tag_size_bytes);
+
+                                    printf("TAG0 variant: prna=%d mack_tow=%.0f gst_delta=%d nmas=%d match=%d calc=",
+                                        mack.prn,
+                                        mack.subframe_epoch.tow,
+                                        tow_delta,
+                                        nmas_variant,
+                                        variant_match ? 1 : 0);
+
+                                    PrintHexPrefix("",
+                                        variant_computed.data(),
+                                        mack.tag_size_bytes,
+                                        mack.tag_size_bytes);
+
+                                    printf("\n");
+                                }
+                            }
+                        }
+
                         ++tag0_mismatch_debug_count;
                     }
                 }
