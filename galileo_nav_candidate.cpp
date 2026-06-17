@@ -5,6 +5,10 @@
 
 #include "osnma_bit_utils.h"
 
+#ifndef OSNMA_VERBOSE_NAVDATA
+#define OSNMA_VERBOSE_NAVDATA 0
+#endif
+
 bool GalileoNavCandidate::HasWord(int32_t wt) const
 {
     if (wt < 0 || wt > GAL_MAX_WT)
@@ -360,6 +364,7 @@ GalileoNavCandidateStore::FindComplete(int32_t prn,
 
     if (exact_it == candidates_.end())
     {
+#if OSNMA_VERBOSE_NAVDATA
         static int32_t find_missing_debug_count = 0;
 
         if (find_missing_debug_count < 120)
@@ -402,6 +407,7 @@ GalileoNavCandidateStore::FindComplete(int32_t prn,
             printf("\n");
             ++find_missing_debug_count;
         }
+#endif
 
         return nullptr;
     }
@@ -410,6 +416,7 @@ GalileoNavCandidateStore::FindComplete(int32_t prn,
 
     if (IsExpired(candidate, now))
     {
+#if OSNMA_VERBOSE_NAVDATA
         static int32_t find_expired_debug_count = 0;
 
         if (find_expired_debug_count < 40)
@@ -424,12 +431,14 @@ GalileoNavCandidateStore::FindComplete(int32_t prn,
 
             ++find_expired_debug_count;
         }
+#endif
 
         return nullptr;
     }
 
     if (!candidate.HasCedData())
     {
+#if OSNMA_VERBOSE_NAVDATA
         static int32_t find_incomplete_debug_count = 0;
 
         if (find_incomplete_debug_count < 120)
@@ -447,12 +456,14 @@ GalileoNavCandidateStore::FindComplete(int32_t prn,
 
             ++find_incomplete_debug_count;
         }
+#endif
 
         return nullptr;
     }
 
     if (!candidate.IsCedCopEligible(cop))
     {
+#if OSNMA_VERBOSE_NAVDATA
         static int32_t find_cop_debug_count = 0;
 
         if (find_cop_debug_count < 120)
@@ -472,6 +483,7 @@ GalileoNavCandidateStore::FindComplete(int32_t prn,
 
             ++find_cop_debug_count;
         }
+#endif
 
         return nullptr;
     }
@@ -711,6 +723,7 @@ void GalileoNavCandidateStore::StoreWord(GalileoNavCandidate& candidate,
     std::memcpy(word.even.data(), page.even, GAL_INAV_BYTES);
     std::memcpy(word.odd.data(), page.odd, GAL_INAV_BYTES);
 
+#if OSNMA_VERBOSE_NAVDATA
     static int32_t nav_store_debug_count = 0;
 
     if (nav_store_debug_count < 80)
@@ -743,6 +756,7 @@ void GalileoNavCandidateStore::StoreWord(GalileoNavCandidate& candidate,
 
         ++nav_store_debug_count;
     }
+#endif
 }
 
 void GalileoNavCandidateStore::ClearWord(GalileoNavCandidate& candidate,

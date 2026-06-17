@@ -9,6 +9,10 @@
 #include "osnma_crypto.h"
 #include "osnma_mac_lookup.h"
 
+#ifndef OSNMA_VERBOSE_NAVDATA
+#define OSNMA_VERBOSE_NAVDATA 0
+#endif
+
 namespace
 {
     GnssTime AddSecondsNormalized(const GnssTime& time,
@@ -320,6 +324,7 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
 
         if (tag0_candidate == nullptr)
         {
+#if OSNMA_VERBOSE_NAVDATA
             static int32_t tag0_missing_nav_debug_count = 0;
 
             if (tag0_missing_nav_debug_count < 40)
@@ -337,6 +342,7 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
 
                 ++tag0_missing_nav_debug_count;
             }
+#endif
         }
 
         if (tag0_candidate != nullptr)
@@ -464,6 +470,7 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
 
         if (candidate == nullptr)
         {
+#if OSNMA_VERBOSE_NAVDATA
             static int32_t tag_missing_nav_debug_count = 0;
 
             if (tag_missing_nav_debug_count < 80)
@@ -484,6 +491,7 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
 
                 ++tag_missing_nav_debug_count;
             }
+#endif
 
             continue;
         }
