@@ -1,5 +1,9 @@
 #include "osnma_engine.h"
 
+#ifndef OSNMA_VERBOSE_CRYPTO
+#define OSNMA_VERBOSE_CRYPTO 0
+#endif
+
 #include <cstdio>
 #include <cmath>
 
@@ -198,6 +202,7 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
         {
             ++statistics_.kroot_received;
 
+#if OSNMA_VERBOSE_CRYPTO
             printf("KROOT decoded: DSM_ID=%d PKID=%d CID=%d HF=%d MF=%d KS=%d TS=%d MACLT=%d WN=%d TOWH=%d\n",
                 message.dsm_id,
                 decoded.kroot.public_key_id,
@@ -209,6 +214,7 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
                 decoded.kroot.mac_lookup_table,
                 decoded.kroot.kroot_wn,
                 decoded.kroot.kroot_towh);
+#endif
 
             const bool verified =
                 trust_store_.AddKroot(decoded.kroot,

@@ -1,5 +1,9 @@
 #include "osnma_trust_store.h"
 
+#ifndef OSNMA_VERBOSE_CRYPTO
+#define OSNMA_VERBOSE_CRYPTO 0
+#endif
+
 #include <cstdio>
 
 void OsnmaTrustStore::Reset()
@@ -94,6 +98,7 @@ bool OsnmaTrustStore::AddKroot(const OsnmaDsmKroot& kroot,
     const OsnmaDsmPkr* public_key =
         public_key_idx >= 0 ? &pkr_list_[public_key_idx].pkr : nullptr;
 
+#if OSNMA_VERBOSE_CRYPTO
     printf("AddKroot: kroot_pkid=%d trusted_public_key=%d",
         kroot.public_key_id,
         public_key != nullptr ? 1 : 0);
@@ -108,16 +113,19 @@ bool OsnmaTrustStore::AddKroot(const OsnmaDsmKroot& kroot,
     }
 
     printf("\n");
+#endif
 
     if (public_key != nullptr)
     {
         AuthReason reason = AuthReason::None;
         verified = kroot_verifier_.Verify(kroot, *public_key, reason);
 
+#if OSNMA_VERBOSE_CRYPTO
         printf("AddKroot result: kroot_pkid=%d verified=%d reason=%d\n",
             kroot.public_key_id,
             verified ? 1 : 0,
             static_cast<int32_t>(reason));
+#endif
     }
 
     kroot_list_[idx].valid = true;

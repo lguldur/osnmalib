@@ -15,6 +15,10 @@
 #include "mbedtls/sha3.h"
 #endif
 
+#ifndef OSNMA_VERBOSE_CRYPTO
+#define OSNMA_VERBOSE_CRYPTO 0
+#endif
+
 namespace
 {
     bool IsValidBuffer(const std::uint8_t* p, int32_t n)
@@ -102,6 +106,7 @@ namespace
         const std::uint8_t* signature,
         int32_t signature_size_bytes)
     {
+#if OSNMA_VERBOSE_CRYPTO
         printf("ECDSA raw verify input: group_id=%d pk_size=%d pk_first=%02X "
             "hash_size=%d sig_size=%d\n",
             static_cast<int32_t>(group_id),
@@ -109,6 +114,7 @@ namespace
             public_key_size_bytes > 0 && public_key != nullptr ? public_key[0] : 0,
             hash_size_bytes,
             signature_size_bytes);
+#endif
 
         if (!IsValidBuffer(public_key, public_key_size_bytes) ||
             !IsValidBuffer(signature, signature_size_bytes) ||
@@ -215,7 +221,9 @@ namespace
                 break;
             }
 
+#if OSNMA_VERBOSE_CRYPTO
             printf("ECDSA raw verify OK\n");
+#endif
             ok = true;
         } while (false);
 

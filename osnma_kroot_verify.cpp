@@ -4,6 +4,10 @@
 #include <array>
 #include <cstdio>
 
+#ifndef OSNMA_VERBOSE_CRYPTO
+#define OSNMA_VERBOSE_CRYPTO 0
+#endif
+
 static void PrintHexPrefix(const char* name,
     const std::uint8_t* data,
     int32_t size,
@@ -32,6 +36,7 @@ bool OsnmaKrootVerifier::Verify(const OsnmaDsmKroot& kroot,
     const OsnmaDsmPkr& public_key,
     AuthReason& reason_out) const
 {
+#if OSNMA_VERBOSE_CRYPTO
     printf("KROOT verify input: "
         "nma=%02X kroot_pkid=%d npkid=%d npkt=%d "
         "raw_size=%d sig_offset=%d sig_size=%d "
@@ -46,6 +51,7 @@ bool OsnmaKrootVerifier::Verify(const OsnmaDsmKroot& kroot,
         public_key.public_key_size_bytes,
         public_key.public_key_size_bytes > 0 ? public_key.public_key[0] : 0,
         static_cast<int32_t>(kroot.ecdsa_function));
+#endif
 
     if (!kroot.valid_layout || !public_key.valid_layout)
     {
@@ -108,6 +114,7 @@ bool OsnmaKrootVerifier::Verify(const OsnmaDsmKroot& kroot,
     const std::uint8_t* signature = kroot.signature.data();
     const int32_t signature_size = kroot.signature_size_bytes;
 
+#if OSNMA_VERBOSE_CRYPTO
     printf("KROOT verify sizes: signed_message_size=%d signature_size=%d\n",
         signed_message_size,
         signature_size);
@@ -136,6 +143,7 @@ bool OsnmaKrootVerifier::Verify(const OsnmaDsmKroot& kroot,
         signature,
         signature_size,
         24);
+#endif
 
     if (public_key.new_public_key_type ==
         OsnmaNewPublicKeyType::EcdsaP256Sha256)
