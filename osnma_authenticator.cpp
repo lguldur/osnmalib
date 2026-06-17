@@ -14,6 +14,17 @@ bool OsnmaAuthenticator::IsValidPrn(int32_t prn) const
     return prn > 0 && prn < MAX_PRN;
 }
 
+void OsnmaAuthenticator::SetNavTimingMode(NavTimingMode mode)
+{
+    assembler_.SetNavTimingMode(mode);
+    engine_.SetNavTimingMode(mode);
+}
+
+NavTimingMode OsnmaAuthenticator::GetNavTimingMode() const
+{
+    return engine_.GetNavTimingMode();
+}
+
 FeedResult OsnmaAuthenticator::FeedRawInavPage(int32_t prn,
     const std::uint8_t* even_128b,
     const std::uint8_t* odd_128b,

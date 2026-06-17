@@ -85,6 +85,9 @@ public:
 public:
     void Reset();
 
+    void SetNavTimingMode(NavTimingMode mode);
+    NavTimingMode GetNavTimingMode() const;
+
     bool SetMerkleRoot(const std::uint8_t* root_32_bytes);
 
     bool AddTrustedPublicKey(const OsnmaDsmPkr& public_key);

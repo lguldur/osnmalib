@@ -36,6 +36,25 @@ enum class AuthReason : int32_t
     InternalError
 };
 
+
+enum class NavTimingMode : int32_t
+{
+    Standard = 0,
+
+    /*
+        Official EUSPA/GSC CSV E1-B timing.
+
+        Annex B gives the filename time as the first transmitted bit. The
+        useful E1-B page/subframe grid is offset by one second, so page
+        epochs must be assigned with floor((tow - 1) / 30) * 30.
+
+        This mode is only for assigning received page epochs to their 30 s
+        subframe. MAC lookup times are already subframe-boundary GST values
+        and are not shifted again.
+    */
+    OfficialCsvE1B = 1
+};
+
 struct OsnmaConfig
 {
     double auth_validity_s = 90.0;

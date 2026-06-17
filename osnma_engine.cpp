@@ -20,6 +20,15 @@ const OsnmaEngine::Statistics& OsnmaEngine::GetStatistics() const
     return statistics_;
 }
 
+void OsnmaEngine::SetNavTimingMode(NavTimingMode mode)
+{
+    nav_candidate_store_.SetNavTimingMode(mode);
+}
+
+NavTimingMode OsnmaEngine::GetNavTimingMode() const
+{
+    return nav_candidate_store_.GetNavTimingMode();
+}
 
 bool OsnmaEngine::SetMerkleRoot(const std::uint8_t* root_32_bytes)
 {

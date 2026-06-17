@@ -57,6 +57,9 @@ class GalileoNavCandidateStore
 public:
     void Reset();
 
+    void SetNavTimingMode(NavTimingMode mode);
+    NavTimingMode GetNavTimingMode() const;
+
     bool FeedPage(const GalileoInavPageParts& page,
         AuthReason& reason_out);
 
@@ -91,14 +94,17 @@ private:
 
 private:
     std::map<Key, GalileoNavCandidate> candidates_;
+    NavTimingMode timing_mode_ = NavTimingMode::Standard;
 
 private:
     static PageHeader ExtractPageHeader(const GalileoInavPageParts& page);
 
-    static GnssTime MakeSubframeTime(const GnssTime& time);
+    GnssTime MakeSubframeTimeForPageEpoch(const GnssTime& time) const;
 
-    static Key MakeCedKey(int32_t prn,
-        const GnssTime& time);
+    GnssTime MakeSubframeTimeForRequest(const GnssTime& time) const;
+
+    static Key MakeCedKeyFromSubframeTime(int32_t prn,
+        const GnssTime& subframe_time);
 
     static Key MakeTimingKey(int32_t prn);
 
@@ -110,9 +116,9 @@ private:
     static bool IsExpired(const GalileoNavCandidate& candidate,
         const GnssTime& now);
 
-    static void StoreWord(GalileoNavCandidate& candidate,
+    void StoreWord(GalileoNavCandidate& candidate,
         const GalileoInavPageParts& page,
-        int32_t wt);
+        int32_t wt) const;
 
     static void ClearWord(GalileoNavCandidate& candidate,
         int32_t wt);

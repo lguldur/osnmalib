@@ -19,6 +19,9 @@ public:
 
     void Reset();
 
+    void SetNavTimingMode(NavTimingMode mode);
+    NavTimingMode GetNavTimingMode() const;
+
     FeedResult FeedRawInavPage(int32_t prn,
         const std::uint8_t* even_128b,
         const std::uint8_t* odd_128b,

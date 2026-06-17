@@ -8,14 +8,41 @@ void OsnmaSubframeAssembler::Reset()
         sat = SatAssembly{};
 }
 
+void OsnmaSubframeAssembler::SetNavTimingMode(NavTimingMode mode)
+{
+    timing_mode_ = mode;
+}
+
+NavTimingMode OsnmaSubframeAssembler::GetNavTimingMode() const
+{
+    return timing_mode_;
+}
+
 bool OsnmaSubframeAssembler::IsValidPrn(int32_t prn) const
 {
     return prn > 0 && prn < MAX_PRN;
 }
 
+double OsnmaSubframeAssembler::PageReferenceTow(double tow,
+    NavTimingMode mode)
+{
+    if (mode == NavTimingMode::OfficialCsvE1B)
+        return tow - 1.0;
+
+    return tow;
+}
+
 int32_t OsnmaSubframeAssembler::PageIndexFromTow(double tow) const
 {
-    const double subframe_offset = std::fmod(tow, 30.0);
+    double ref_tow = PageReferenceTow(tow, timing_mode_);
+
+    while (ref_tow < 0.0)
+        ref_tow += 604800.0;
+
+    while (ref_tow >= 604800.0)
+        ref_tow -= 604800.0;
+
+    const double subframe_offset = std::fmod(ref_tow, 30.0);
 
     if (subframe_offset < 0.0)
         return -1;
@@ -31,7 +58,22 @@ int32_t OsnmaSubframeAssembler::PageIndexFromTow(double tow) const
 GnssTime OsnmaSubframeAssembler::SubframeEpochFromTime(const GnssTime& t) const
 {
     GnssTime out = t;
-    out.tow = std::floor(t.tow / 30.0) * 30.0;
+
+    double ref_tow = PageReferenceTow(t.tow, timing_mode_);
+
+    while (ref_tow < 0.0)
+    {
+        ref_tow += 604800.0;
+        --out.wn;
+    }
+
+    while (ref_tow >= 604800.0)
+    {
+        ref_tow -= 604800.0;
+        ++out.wn;
+    }
+
+    out.tow = std::floor(ref_tow / 30.0) * 30.0;
     return out;
 }
 

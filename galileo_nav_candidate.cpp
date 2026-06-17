@@ -58,6 +58,16 @@ void GalileoNavCandidateStore::Reset()
     candidates_.clear();
 }
 
+void GalileoNavCandidateStore::SetNavTimingMode(NavTimingMode mode)
+{
+    timing_mode_ = mode;
+}
+
+NavTimingMode GalileoNavCandidateStore::GetNavTimingMode() const
+{
+    return timing_mode_;
+}
+
 bool GalileoNavCandidateStore::FeedPage(const GalileoInavPageParts& page,
     AuthReason& reason_out)
 {
@@ -121,10 +131,10 @@ bool GalileoNavCandidateStore::FeedCedPage(const GalileoInavPageParts& page,
         in every word was wrong and prevented WT2..WT5 from joining WT1.
     */
     const GnssTime subframe_time =
-        MakeSubframeTime(page.page_epoch);
+        MakeSubframeTimeForPageEpoch(page.page_epoch);
 
     const Key key =
-        MakeCedKey(page.prn,
+        MakeCedKeyFromSubframeTime(page.prn,
             subframe_time);
 
     auto it = candidates_.find(key);
@@ -297,10 +307,10 @@ GalileoNavCandidateStore::FindComplete(int32_t prn,
         subframes and is selected according to age/COP by the caller.
     */
     const GnssTime subframe_time =
-        MakeSubframeTime(now);
+        MakeSubframeTimeForRequest(now);
 
     const Key exact_key =
-        MakeCedKey(prn,
+        MakeCedKeyFromSubframeTime(prn,
             subframe_time);
 
     auto exact_it = candidates_.find(exact_key);
@@ -580,29 +590,55 @@ GalileoNavCandidateStore::ExtractPageHeader(const GalileoInavPageParts& page)
     return header;
 }
 
-GnssTime GalileoNavCandidateStore::MakeSubframeTime(const GnssTime& time)
+GnssTime GalileoNavCandidateStore::MakeSubframeTimeForPageEpoch(const GnssTime& time) const
 {
     GnssTime out = time;
 
     if (!IsTimeValid(out))
         return out;
 
-    int32_t tow_s =
+    double ref_tow = out.tow;
+
+    if (timing_mode_ == NavTimingMode::OfficialCsvE1B)
+        ref_tow -= 1.0;
+
+    while (ref_tow < 0.0)
+    {
+        ref_tow += 604800.0;
+        --out.wn;
+    }
+
+    while (ref_tow >= 604800.0)
+    {
+        ref_tow -= 604800.0;
+        ++out.wn;
+    }
+
+    const int32_t tow_s =
+        static_cast<int32_t>(ref_tow);
+
+    out.tow = static_cast<double>((tow_s / 30) * 30);
+    return out;
+}
+
+GnssTime GalileoNavCandidateStore::MakeSubframeTimeForRequest(const GnssTime& time) const
+{
+    GnssTime out = time;
+
+    if (!IsTimeValid(out))
+        return out;
+
+    const int32_t tow_s =
         static_cast<int32_t>(out.tow);
 
-    tow_s = (tow_s / 30) * 30;
-
-    out.tow = static_cast<double>(tow_s);
+    out.tow = static_cast<double>((tow_s / 30) * 30);
     return out;
 }
 
 GalileoNavCandidateStore::Key
-GalileoNavCandidateStore::MakeCedKey(int32_t prn,
-    const GnssTime& time)
+GalileoNavCandidateStore::MakeCedKeyFromSubframeTime(int32_t prn,
+    const GnssTime& subframe_time)
 {
-    const GnssTime subframe_time =
-        MakeSubframeTime(time);
-
     return Key(prn,
         subframe_time.wn,
         static_cast<int32_t>(subframe_time.tow));
@@ -671,7 +707,7 @@ bool GalileoNavCandidateStore::IsExpired(const GalileoNavCandidate& candidate,
 
 void GalileoNavCandidateStore::StoreWord(GalileoNavCandidate& candidate,
     const GalileoInavPageParts& page,
-    int32_t wt)
+    int32_t wt) const
 {
     if (wt < 0 || wt > GAL_MAX_WT)
         return;
@@ -704,7 +740,7 @@ void GalileoNavCandidateStore::StoreWord(GalileoNavCandidate& candidate,
             candidate.HasWord(GAL_WT10);
 
         const GnssTime subframe_time =
-            MakeSubframeTime(page.page_epoch);
+            MakeSubframeTimeForPageEpoch(page.page_epoch);
 
         printf("NAVDATA stored: prn=%d iod=%d toe=%d wt=%d wn=%d tow=%.0f subframe_tow=%.0f has_ced=%d has_timing=%d\n",
             candidate.prn,

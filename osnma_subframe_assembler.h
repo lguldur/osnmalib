@@ -34,6 +34,9 @@ public:
 public:
     void Reset();
 
+    void SetNavTimingMode(NavTimingMode mode);
+    NavTimingMode GetNavTimingMode() const;
+
     bool FeedParsedPage(const ParsedPage& page,
                         OsnmaSubframe& subframe_out,
                         AuthReason& reason_out);
@@ -54,9 +57,11 @@ private:
     bool IsValidPrn(int32_t prn) const;
     int32_t PageIndexFromTow(double tow) const;
     GnssTime SubframeEpochFromTime(const GnssTime& t) const;
+    static double PageReferenceTow(double tow, NavTimingMode mode);
 
     bool SameSubframe(const GnssTime& a, const GnssTime& b) const;
 
 private:
     std::array<SatAssembly, MAX_PRN> sats_{};
+    NavTimingMode timing_mode_ = NavTimingMode::Standard;
 };

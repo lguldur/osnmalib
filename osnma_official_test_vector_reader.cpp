@@ -196,6 +196,8 @@ bool OsnmaOfficialTestVectorReader::FeedFileToAuthenticator(const char* filename
     Stats read_stats{};
     int32_t fed_count = 0;
 
+    authenticator.SetNavTimingMode(NavTimingMode::OfficialCsvE1B);
+
     const bool ok =
         ReadFile(filename,
             [&](const Page& page) -> bool
