@@ -476,25 +476,6 @@ GalileoNavCandidateStore::FindComplete(int32_t prn,
         return nullptr;
     }
 
-    static int32_t find_ok_debug_count = 0;
-
-    if (find_ok_debug_count < 120)
-    {
-        printf("NAVDATA find exact rolling ok: prn=%d requested_wn=%d requested_tow=%.0f selected_tow=%.0f cop=%d max_age=%d w1=%d w2=%d w3=%d w4=%d w5=%d\n",
-            prn,
-            subframe_time.wn,
-            subframe_time.tow,
-            candidate.creation_time.tow,
-            cop,
-            candidate.MaxCedWordAge(),
-            candidate.word_age[GAL_WT1],
-            candidate.word_age[GAL_WT2],
-            candidate.word_age[GAL_WT3],
-            candidate.word_age[GAL_WT4],
-            candidate.word_age[GAL_WT5]);
-
-        ++find_ok_debug_count;
-    }
 
     return &candidate;
 }
