@@ -228,8 +228,19 @@ static void PrintOsnmaEngineStatistics(const OsnmaEngine::Statistics& s)
     printf("  pending_macks_verified_ok=%lld pending_macks_terminal_failed=%lld\n",
            static_cast<long long>(s.pending_macks_verified_ok),
            static_cast<long long>(s.pending_macks_terminal_failed));
-    printf("  auth_success=%lld\n",
-           static_cast<long long>(s.auth_success));
+    printf("  pending_macks_skipped_macseq=%lld pending_macks_failed_tag=%lld pending_macks_failed_other=%lld\n",
+           static_cast<long long>(s.pending_macks_skipped_macseq),
+           static_cast<long long>(s.pending_macks_failed_tag),
+           static_cast<long long>(s.pending_macks_failed_other));
+    printf("  auth_success=%lld authenticated_tag_success=%lld authenticated_auth_bits_total=%lld\n",
+           static_cast<long long>(s.auth_success),
+           static_cast<long long>(s.authenticated_tag_success),
+           static_cast<long long>(s.authenticated_auth_bits_total));
+    printf("  authenticated_object_updates=%lld ced_status=%lld timing=%lld slow_mac=%lld\n",
+           static_cast<long long>(s.authenticated_object_updates),
+           static_cast<long long>(s.authenticated_ced_status_objects),
+           static_cast<long long>(s.authenticated_timing_objects),
+           static_cast<long long>(s.authenticated_slow_mac_objects));
 }
 
 static bool RunSelfTests()

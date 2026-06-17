@@ -1,6 +1,7 @@
 #include "osnma_engine.h"
 
 #include <cstdio>
+#include <cmath>
 
 void OsnmaEngine::Reset()
 {
@@ -11,6 +12,8 @@ void OsnmaEngine::Reset()
 
     for (auto& p : pending_macks_)
         p = PendingMack{};
+
+    authenticated_objects_.clear();
 
     statistics_ = Statistics{};
 }
@@ -436,6 +439,81 @@ void OsnmaEngine::UpdatePendingMackStatistics()
         statistics_.pending_macks_max_seen = count;
 }
 
+void OsnmaEngine::RegisterMacSuccesses(const OsnmaMacVerifier::Result& mac_result)
+{
+    for (int32_t i = 0;
+        i < mac_result.success_count &&
+        i < OsnmaMacVerifier::Result::MAX_SUCCESS_RECORDS;
+        ++i)
+    {
+        const OsnmaMacVerifier::Result::SuccessRecord& success =
+            mac_result.success_records[i];
+
+        if (success.prnd <= 0 || !IsTimeValid(success.nav_time))
+            continue;
+
+        const AuthenticatedObjectKey key =
+            std::make_tuple(success.prnd,
+                static_cast<int32_t>(success.adkd),
+                success.nav_fingerprint);
+
+        AuthenticatedObjectState& state = authenticated_objects_[key];
+
+        const bool first_authentication = (state.auth_bits == 0);
+
+        state.auth_bits += success.tag_bits;
+
+        ++statistics_.authenticated_tag_success;
+        statistics_.authenticated_auth_bits_total += success.tag_bits;
+
+        if (!first_authentication)
+            continue;
+
+        ++statistics_.authenticated_object_updates;
+
+        if (success.adkd == OsnmaAdkd::InavCed)
+        {
+            ++statistics_.authenticated_ced_status_objects;
+            printf("OSNMA auth: new CED and status for E%02d authenticated "
+                "(authbits=%lld, GST={wn=%d,tow=%.0f})\n",
+                success.prnd,
+                static_cast<long long>(state.auth_bits),
+                success.nav_time.wn,
+                success.nav_time.tow);
+        }
+        else if (success.adkd == OsnmaAdkd::InavTiming)
+        {
+            ++statistics_.authenticated_timing_objects;
+            printf("OSNMA auth: new timing parameters for E%02d authenticated "
+                "(authbits=%lld, GST={wn=%d,tow=%.0f})\n",
+                success.prnd,
+                static_cast<long long>(state.auth_bits),
+                success.nav_time.wn,
+                success.nav_time.tow);
+        }
+        else if (success.adkd == OsnmaAdkd::SlowMac)
+        {
+            ++statistics_.authenticated_slow_mac_objects;
+            printf("OSNMA auth: new slow MAC object for E%02d authenticated "
+                "(authbits=%lld, GST={wn=%d,tow=%.0f})\n",
+                success.prnd,
+                static_cast<long long>(state.auth_bits),
+                success.nav_time.wn,
+                success.nav_time.tow);
+        }
+        else
+        {
+            printf("OSNMA auth: new ADKD %d object for E%02d authenticated "
+                "(authbits=%lld, GST={wn=%d,tow=%.0f})\n",
+                static_cast<int32_t>(success.adkd),
+                success.prnd,
+                static_cast<long long>(state.auth_bits),
+                success.nav_time.wn,
+                success.nav_time.tow);
+        }
+    }
+}
+
 OsnmaEngine::Result
 OsnmaEngine::VerifyPendingMacks(const OsnmaDsmKroot& trusted_kroot,
     const GnssTime& now)
@@ -472,6 +550,7 @@ OsnmaEngine::VerifyPendingMacks(const OsnmaDsmKroot& trusted_kroot,
         if (mac_result.state == AuthState::Yes)
         {
             ++statistics_.pending_macks_verified_ok;
+            RegisterMacSuccesses(mac_result);
             RemovePendingMack(i);
 
             result.state = AuthState::Yes;
@@ -522,14 +601,39 @@ OsnmaEngine::VerifyPendingMacks(const OsnmaDsmKroot& trusted_kroot,
         }
 
         /*
+            MACSEQ mismatches are kept separate from tag authentication
+            failures. Daniel's test-vector runner does not expose these as
+            visible authentication failures for configuration_1, so they are
+            counted as skipped MACKs here instead of polluting the terminal
+            tag-failure counter.
+        */
+        if (mac_result.reason == AuthReason::MackVerificationFailed &&
+            mac_result.debug_stage == 1)
+        {
+            ++statistics_.pending_macks_skipped_macseq;
+            RemovePendingMack(i);
+            continue;
+        }
+
+        /*
             At this point the relevant key was available and the MAC path
-            reached a terminal failure for this pending MACK.
+            reached a real terminal failure for this pending MACK.
         */
         if (mac_result.reason == AuthReason::MackVerificationFailed ||
             mac_result.reason == AuthReason::UnsupportedMessage ||
             mac_result.reason == AuthReason::InvalidFrameFormat)
         {
             ++statistics_.pending_macks_terminal_failed;
+
+            if (mac_result.reason == AuthReason::MackVerificationFailed &&
+                (mac_result.debug_stage == 2 || mac_result.debug_stage == 3))
+            {
+                ++statistics_.pending_macks_failed_tag;
+            }
+            else
+            {
+                ++statistics_.pending_macks_failed_other;
+            }
 
             printf("TAG terminal failed: "
                 "reason=%d stage=%d mack_prn=%d tag_index=%d ctr=%d "

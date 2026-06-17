@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdio>
 #include <vector>
+#include <cstdint>
 
 #include "osnma_bit_utils.h"
 #include "osnma_crypto.h"
@@ -83,6 +84,52 @@ namespace
         return prn >= 1 && prn <= 36;
     }
 
+    std::uint64_t Fnv1a64(const std::uint8_t* data,
+        int32_t size_bytes)
+    {
+        static constexpr std::uint64_t FNV_OFFSET =
+            14695981039346656037ull;
+        static constexpr std::uint64_t FNV_PRIME =
+            1099511628211ull;
+
+        std::uint64_t h = FNV_OFFSET;
+
+        if (data == nullptr || size_bytes <= 0)
+            return h;
+
+        for (int32_t i = 0; i < size_bytes; ++i)
+        {
+            h ^= static_cast<std::uint64_t>(data[i]);
+            h *= FNV_PRIME;
+        }
+
+        return h;
+    }
+
+    std::uint64_t NavFingerprintFromMacInput(const std::vector<std::uint8_t>& mac_input,
+        bool tag0)
+    {
+        /*
+            Daniel logs new authenticated navigation objects, not every
+            authenticated tag/GST. The navigation object identity is therefore
+            based on the authenticated NMAS+navdata payload, excluding the
+            tag-specific PRN/GST/CTR prefix:
+
+              Tag0:       PRNA || GST || CTR || NMAS || navdata
+                           ^ hash from byte 6
+
+              Normal tag: PRND || PRNA || GST || CTR || NMAS || navdata
+                           ^ hash from byte 7
+        */
+        const int32_t offset = tag0 ? 6 : 7;
+
+        if (static_cast<int32_t>(mac_input.size()) <= offset)
+            return Fnv1a64(nullptr, 0);
+
+        return Fnv1a64(mac_input.data() + offset,
+            static_cast<int32_t>(mac_input.size()) - offset);
+    }
+
     bool MakeEffectiveMacltTag(const OsnmaMackMessage& mack,
         int32_t maclt,
         const OsnmaMackTagInfo& raw_tag,
@@ -153,6 +200,35 @@ namespace
 
         return false;
     }
+}
+
+void OsnmaMacVerifier::AddSuccess(Result& result,
+    int32_t prna,
+    int32_t prnd,
+    OsnmaAdkd adkd,
+    int32_t tag_index,
+    int32_t tag_bits,
+    const GnssTime& nav_time,
+    std::uint64_t nav_fingerprint)
+{
+    if (result.success_count < 0 ||
+        result.success_count >= Result::MAX_SUCCESS_RECORDS)
+    {
+        return;
+    }
+
+    Result::SuccessRecord& record =
+        result.success_records[result.success_count];
+
+    record.prna = prna;
+    record.prnd = prnd;
+    record.adkd = adkd;
+    record.tag_index = tag_index;
+    record.tag_bits = tag_bits;
+    record.nav_time = nav_time;
+    record.nav_fingerprint = nav_fingerprint;
+
+    ++result.success_count;
 }
 
 OsnmaMacVerifier::Result
@@ -322,9 +398,14 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
                         mack.tag0.data(),
                         mack.tag_size_bytes))
                     {
-                        result.state = AuthState::Yes;
-                        result.reason = AuthReason::None;
-                        return result;
+                        AddSuccess(result,
+                            mack.prn,
+                            mack.prn,
+                            OsnmaAdkd::InavCed,
+                            0,
+                            mack.tag_size_bits,
+                            tag0_nav_time,
+                            NavFingerprintFromMacInput(mac_input, true));
                     }
 
 
@@ -458,9 +539,15 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
             tag.tag.data(),
             tag.tag_size_bytes))
         {
-            result.state = AuthState::Yes;
-            result.reason = AuthReason::None;
-            return result;
+            AddSuccess(result,
+                mack.prn,
+                tag.prnd,
+                tag.adkd,
+                tag.index,
+                tag.tag_size_bits,
+                tag_nav_time,
+                NavFingerprintFromMacInput(mac_input, false));
+            continue;
         }
 
         static int32_t tag_mismatch_debug_count = 0;
@@ -519,6 +606,13 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
 
             ++tag_mismatch_debug_count;
         }
+    }
+
+    if (result.success_count > 0)
+    {
+        result.state = AuthState::Yes;
+        result.reason = AuthReason::None;
+        return result;
     }
 
     result.state = AuthState::Unknown;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -45,6 +46,22 @@ public:
         bool debug_has_nav = false;
         bool debug_has_key = false;
         bool debug_has_mac_input = false;
+
+        struct SuccessRecord
+        {
+            int32_t prna = -1;
+            int32_t prnd = -1;
+            OsnmaAdkd adkd = OsnmaAdkd::Reserved;
+            int32_t tag_index = -1;
+            int32_t tag_bits = 0;
+            GnssTime nav_time{};
+            std::uint64_t nav_fingerprint = 0;
+        };
+
+        static constexpr int32_t MAX_SUCCESS_RECORDS = 8;
+
+        int32_t success_count = 0;
+        std::array<SuccessRecord, MAX_SUCCESS_RECORDS> success_records{};
     };
 
 public:
@@ -69,6 +86,15 @@ private:
     static MacseqStatus VerifyMacseq(const OsnmaMackMessage& mack,
         const OsnmaTeslaChain& tesla_chain,
         OsnmaMacFunction mac_function);
+
+    static void AddSuccess(Result& result,
+        int32_t prna,
+        int32_t prnd,
+        OsnmaAdkd adkd,
+        int32_t tag_index,
+        int32_t tag_bits,
+        const GnssTime& nav_time,
+        std::uint64_t nav_fingerprint);
 
     static bool BuildMacseqInput(const OsnmaMackMessage& mack,
         int32_t maclt,

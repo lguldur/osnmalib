@@ -2,6 +2,8 @@
 
 #include <array>
 #include <cstdint>
+#include <map>
+#include <tuple>
 
 #include "auth_record.h"
 #include "galileo_inav_page_parts.h"
@@ -70,6 +72,9 @@ public:
         std::int64_t pending_macks_cleaned = 0;
         std::int64_t pending_macks_verified_ok = 0;
         std::int64_t pending_macks_terminal_failed = 0;
+        std::int64_t pending_macks_skipped_macseq = 0;
+        std::int64_t pending_macks_failed_tag = 0;
+        std::int64_t pending_macks_failed_other = 0;
 
         std::int64_t pending_verification_runs = 0;
         std::int64_t pending_macks_checked = 0;
@@ -77,6 +82,12 @@ public:
         std::int64_t pending_missing_navdata = 0;
 
         std::int64_t auth_success = 0;
+        std::int64_t authenticated_tag_success = 0;
+        std::int64_t authenticated_auth_bits_total = 0;
+        std::int64_t authenticated_object_updates = 0;
+        std::int64_t authenticated_ced_status_objects = 0;
+        std::int64_t authenticated_timing_objects = 0;
+        std::int64_t authenticated_slow_mac_objects = 0;
 
         int32_t pending_macks_current = 0;
         int32_t pending_macks_max_seen = 0;
@@ -116,6 +127,14 @@ private:
         int32_t raw_source = 0;
     };
 
+    struct AuthenticatedObjectState
+    {
+        std::int64_t auth_bits = 0;
+    };
+
+    using AuthenticatedObjectKey =
+        std::tuple<int32_t, int32_t, std::uint64_t>;
+
 private:
     Result MakePendingResult(const OsnmaSubframe& subframe,
         NavSignalSource source,
@@ -133,6 +152,8 @@ private:
 
     void UpdatePendingMackStatistics();
 
+    void RegisterMacSuccesses(const OsnmaMacVerifier::Result& mac_result);
+
     Result VerifyPendingMacks(const OsnmaDsmKroot& trusted_kroot,
         const GnssTime& now);
 
@@ -146,6 +167,7 @@ private:
     OsnmaMacVerifier mac_verifier_{};
 
     std::array<PendingMack, MAX_PENDING_MACKS> pending_macks_{};
+    std::map<AuthenticatedObjectKey, AuthenticatedObjectState> authenticated_objects_{};
 
     Statistics statistics_{};
 };
