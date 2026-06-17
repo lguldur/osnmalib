@@ -201,8 +201,10 @@ static void PrintOsnmaEngineStatistics(const OsnmaEngine::Statistics& s)
     printf("  tesla_initialized=%lld tesla_init_failed=%lld\n",
            static_cast<long long>(s.tesla_initialized),
            static_cast<long long>(s.tesla_init_failed));
-    printf("  disclosed_keys_verified=%lld disclosed_keys_failed=%lld\n",
+    printf("  disclosed_keys_verified=%lld disclosed_keys_new=%lld disclosed_keys_ignored_same_or_older=%lld disclosed_keys_failed=%lld\n",
            static_cast<long long>(s.disclosed_keys_verified),
+           static_cast<long long>(s.disclosed_keys_new),
+           static_cast<long long>(s.disclosed_keys_ignored_same_or_older),
            static_cast<long long>(s.disclosed_keys_failed));
     printf("  subframes_waiting_for_kroot=%lld\n",
            static_cast<long long>(s.subframes_waiting_for_kroot));

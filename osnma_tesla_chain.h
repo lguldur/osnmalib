@@ -14,6 +14,25 @@ public:
     static constexpr int32_t MAX_STORED_KEYS = 128;
     static constexpr int32_t MAX_KEY_BYTES = 32;
 
+    enum class DisclosedKeyStatus : int32_t
+    {
+        VerifiedNew = 0,
+        IgnoredSameOrOlder,
+        WaitingForKey,
+        Invalid,
+        VerificationFailed,
+        StoreFailed
+    };
+
+    struct DisclosedKeyResult
+    {
+        DisclosedKeyStatus status = DisclosedKeyStatus::Invalid;
+        AuthReason reason = AuthReason::None;
+        int32_t key_index = -1;
+        GnssTime key_time{};
+        bool stored_new_key = false;
+    };
+
 public:
     void Reset();
 
@@ -26,6 +45,8 @@ public:
 
     bool VerifyAndStoreDisclosedKey(const OsnmaMackMessage& mack,
         AuthReason& reason_out);
+
+    DisclosedKeyResult VerifyAndStoreDisclosedKeyDetailed(const OsnmaMackMessage& mack);
 
     bool GetKeyForTag(const OsnmaMackMessage& mack,
         const OsnmaMackTagInfo& tag,
@@ -79,6 +100,8 @@ private:
     int32_t FindFreeSlot() const;
 
     int32_t FindKeySlot(int32_t key_index) const;
+
+    int32_t FindNewestKeyIndex() const;
 
     int32_t ComputeDisclosureIndex(const GnssTime& time) const;
 

@@ -60,6 +60,8 @@ public:
         std::int64_t tesla_initialized = 0;
         std::int64_t tesla_init_failed = 0;
         std::int64_t disclosed_keys_verified = 0;
+        std::int64_t disclosed_keys_new = 0;
+        std::int64_t disclosed_keys_ignored_same_or_older = 0;
         std::int64_t disclosed_keys_failed = 0;
 
         std::int64_t subframes_waiting_for_kroot = 0;
@@ -153,6 +155,15 @@ private:
     void UpdatePendingMackStatistics();
 
     void RegisterMacSuccesses(const OsnmaMacVerifier::Result& mac_result);
+
+    static bool IsSameSubframeTime(const GnssTime& a,
+        const GnssTime& b);
+
+    static GnssTime AddSecondsNormalized(const GnssTime& time,
+        double seconds);
+
+    Result ProcessMacksForDisclosedKey(const OsnmaDsmKroot& trusted_kroot,
+        const GnssTime& disclosed_key_time);
 
     Result VerifyPendingMacks(const OsnmaDsmKroot& trusted_kroot,
         const GnssTime& now);

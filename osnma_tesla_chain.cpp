@@ -135,57 +135,79 @@ int32_t OsnmaTeslaChain::GetMacLookupTable() const
 bool OsnmaTeslaChain::VerifyAndStoreDisclosedKey(const OsnmaMackMessage& mack,
     AuthReason& reason_out)
 {
-    reason_out = AuthReason::None;
+    const DisclosedKeyResult result =
+        VerifyAndStoreDisclosedKeyDetailed(mack);
+
+    reason_out = result.reason;
+
+    return result.status == DisclosedKeyStatus::VerifiedNew ||
+        result.status == DisclosedKeyStatus::IgnoredSameOrOlder;
+}
+
+OsnmaTeslaChain::DisclosedKeyResult
+OsnmaTeslaChain::VerifyAndStoreDisclosedKeyDetailed(const OsnmaMackMessage& mack)
+{
+    DisclosedKeyResult result{};
+    result.status = DisclosedKeyStatus::Invalid;
+    result.reason = AuthReason::None;
 
     if (!initialized_)
     {
-        reason_out = AuthReason::WaitingForKey;
-        return false;
+        result.status = DisclosedKeyStatus::WaitingForKey;
+        result.reason = AuthReason::WaitingForKey;
+        return result;
     }
 
     if (!mack.valid_layout)
     {
-        reason_out = AuthReason::InvalidFrameFormat;
-        return false;
+        result.status = DisclosedKeyStatus::Invalid;
+        result.reason = AuthReason::InvalidFrameFormat;
+        return result;
     }
 
     if (!IsTimeValid(mack.subframe_epoch))
     {
-        reason_out = AuthReason::InvalidTime;
-        return false;
+        result.status = DisclosedKeyStatus::Invalid;
+        result.reason = AuthReason::InvalidTime;
+        return result;
     }
 
     if (mack.key_size_bytes != key_size_bytes_)
     {
-        reason_out = AuthReason::InvalidFrameFormat;
-        return false;
+        result.status = DisclosedKeyStatus::Invalid;
+        result.reason = AuthReason::InvalidFrameFormat;
+        return result;
     }
 
     const int32_t key_index =
         ComputeDisclosureIndex(mack.subframe_epoch);
 
+    result.key_index = key_index;
+
     if (key_index <= 0)
     {
-        reason_out = AuthReason::InvalidTime;
-        return false;
+        result.status = DisclosedKeyStatus::Invalid;
+        result.reason = AuthReason::InvalidTime;
+        return result;
     }
 
-    const int32_t existing_slot = FindKeySlot(key_index);
+    result.key_time = ComputeTimeForIndex(key_index);
 
-    if (existing_slot >= 0)
+    /*
+        Daniel-style scheduling:
+
+        The receiver only reacts to a disclosed key if it is newer than the
+        newest trusted TESLA key. Keys for the same GST, or older keys, are not
+        treated as failed verification attempts. They have already been made
+        obsolete by a trusted key in the chain.
+    */
+    const int32_t newest_key_index = FindNewestKeyIndex();
+
+    if (newest_key_index >= 0 && key_index <= newest_key_index)
     {
-        const KeyEntry& existing = keys_[existing_slot];
-
-        if (ConstantTimeEqual(existing.key.data(),
-            mack.disclosed_key.data(),
-            key_size_bytes_))
-        {
-            reason_out = AuthReason::None;
-            return true;
-        }
-
-        reason_out = AuthReason::TeslaChainVerificationFailed;
-        return false;
+        result.status = DisclosedKeyStatus::IgnoredSameOrOlder;
+        result.reason = AuthReason::None;
+        return result;
     }
 
     const bool verified =
@@ -195,27 +217,28 @@ bool OsnmaTeslaChain::VerifyAndStoreDisclosedKey(const OsnmaMackMessage& mack,
 
     if (!verified)
     {
-        reason_out = AuthReason::TeslaChainVerificationFailed;
-        return false;
+        result.status = DisclosedKeyStatus::VerificationFailed;
+        result.reason = AuthReason::TeslaChainVerificationFailed;
+        return result;
     }
-
-    const GnssTime key_time =
-        ComputeTimeForIndex(key_index);
 
     const bool stored =
         StoreVerifiedKey(key_index,
-            key_time,
+            result.key_time,
             mack.disclosed_key.data(),
             key_size_bytes_);
 
     if (!stored)
     {
-        reason_out = AuthReason::BufferOverflow;
-        return false;
+        result.status = DisclosedKeyStatus::StoreFailed;
+        result.reason = AuthReason::BufferOverflow;
+        return result;
     }
 
-    reason_out = AuthReason::None;
-    return true;
+    result.status = DisclosedKeyStatus::VerifiedNew;
+    result.reason = AuthReason::None;
+    result.stored_new_key = true;
+    return result;
 }
 
 bool OsnmaTeslaChain::GetKeyForTag(const OsnmaMackMessage& mack,
@@ -334,6 +357,22 @@ int32_t OsnmaTeslaChain::FindKeySlot(int32_t key_index) const
     }
 
     return -1;
+}
+
+int32_t OsnmaTeslaChain::FindNewestKeyIndex() const
+{
+    int32_t newest = -1;
+
+    for (const KeyEntry& entry : keys_)
+    {
+        if (!entry.valid || !entry.verified)
+            continue;
+
+        if (entry.index > newest)
+            newest = entry.index;
+    }
+
+    return newest;
 }
 
 int32_t OsnmaTeslaChain::ComputeDisclosureIndex(const GnssTime& time) const
