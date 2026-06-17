@@ -1,5 +1,7 @@
 #include "osnma_trust_store.h"
 
+#include <cstdio>
+
 void OsnmaTrustStore::Reset()
 {
     for (auto& p : pkr_list_)
@@ -38,6 +40,33 @@ int32_t OsnmaTrustStore::FindFreeKrootSlot() const
     return 0;
 }
 
+
+bool OsnmaTrustStore::AddTrustedPublicKey(const OsnmaDsmPkr& public_key,
+    const GnssTime& time)
+{
+    if (!public_key.valid_layout ||
+        public_key.new_public_key_id < 0 ||
+        public_key.public_key_size_bytes <= 0)
+    {
+        return false;
+    }
+
+    const int32_t idx = FindFreePkrSlot();
+
+    pkr_list_[idx].valid = true;
+    pkr_list_[idx].merkle_verified = true;
+    pkr_list_[idx].time = time;
+    pkr_list_[idx].pkr = public_key;
+
+    printf("Trusted PublicKey loaded: npkid=%d npkt=%d pk_bytes=%d pk_first=%02X\n",
+        public_key.new_public_key_id,
+        static_cast<int32_t>(public_key.new_public_key_type),
+        public_key.public_key_size_bytes,
+        public_key.public_key_size_bytes > 0 ? public_key.public_key[0] : 0);
+
+    return true;
+}
+
 bool OsnmaTrustStore::AddPkr(const OsnmaDsmPkr& pkr,
                              const GnssTime& time)
 {
@@ -61,7 +90,9 @@ bool OsnmaTrustStore::AddKroot(const OsnmaDsmKroot& kroot,
 
     bool verified = false;
 
-    const OsnmaDsmPkr* public_key = GetTrustedPublicKey();
+    const int32_t public_key_idx = FindVerifiedPkrById(kroot.public_key_id);
+    const OsnmaDsmPkr* public_key =
+        public_key_idx >= 0 ? &pkr_list_[public_key_idx].pkr : nullptr;
 
     printf("AddKroot: kroot_pkid=%d trusted_public_key=%d",
         kroot.public_key_id,
@@ -104,6 +135,29 @@ int32_t OsnmaTrustStore::FindLatestVerifiedPkr() const
     for (int32_t i = 0; i < MAX_PKR; ++i)
     {
         if (!pkr_list_[i].valid || !pkr_list_[i].merkle_verified)
+            continue;
+
+        if (best < 0 ||
+            DiffSeconds(pkr_list_[i].time, pkr_list_[best].time) > 0.0)
+        {
+            best = i;
+        }
+    }
+
+    return best;
+}
+
+
+int32_t OsnmaTrustStore::FindVerifiedPkrById(int32_t public_key_id) const
+{
+    int32_t best = -1;
+
+    for (int32_t i = 0; i < MAX_PKR; ++i)
+    {
+        if (!pkr_list_[i].valid || !pkr_list_[i].merkle_verified)
+            continue;
+
+        if (pkr_list_[i].pkr.new_public_key_id != public_key_id)
             continue;
 
         if (best < 0 ||

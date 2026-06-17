@@ -87,6 +87,8 @@ public:
 
     bool SetMerkleRoot(const std::uint8_t* root_32_bytes);
 
+    bool AddTrustedPublicKey(const OsnmaDsmPkr& public_key);
+
     bool FeedNavigationPage(const GalileoInavPageParts& page,
         AuthReason& reason_out);
 

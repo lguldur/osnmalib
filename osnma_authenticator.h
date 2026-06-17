@@ -5,6 +5,7 @@
 
 #include "galileo_inav_page_parts.h"
 #include "osnma_engine.h"
+#include "osnma_dsm_content.h"
 #include "osnma_page_parser.h"
 #include "osnma_subframe_assembler.h"
 #include "osnma_types.h"
@@ -33,6 +34,8 @@ public:
     const OsnmaEngine::Statistics& GetEngineStatistics() const;
 
     bool SetMerkleRoot(const std::uint8_t* root_32_bytes);
+
+    bool AddTrustedPublicKey(const OsnmaDsmPkr& public_key);
 
 private:
     struct SatRecord

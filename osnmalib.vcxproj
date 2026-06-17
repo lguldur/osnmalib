@@ -46,6 +46,7 @@
     <ClInclude Include="osnma_tesla_chain.h" />
     <ClInclude Include="osnma_trust_store.h" />
     <ClInclude Include="osnma_types.h" />
+    <ClInclude Include="osnma_xml_material_loader.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="galileo_auth_data_fifo.cpp" />
@@ -69,6 +70,7 @@
     <ClCompile Include="osnma_subframe_assembler.cpp" />
     <ClCompile Include="osnma_tesla_chain.cpp" />
     <ClCompile Include="osnma_trust_store.cpp" />
+    <ClCompile Include="osnma_xml_material_loader.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>

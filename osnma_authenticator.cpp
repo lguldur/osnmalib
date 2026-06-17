@@ -131,3 +131,8 @@ bool OsnmaAuthenticator::SetMerkleRoot(const std::uint8_t* root_32_bytes)
 {
     return engine_.SetMerkleRoot(root_32_bytes);
 }
+
+bool OsnmaAuthenticator::AddTrustedPublicKey(const OsnmaDsmPkr& public_key)
+{
+    return engine_.AddTrustedPublicKey(public_key);
+}

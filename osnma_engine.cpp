@@ -26,6 +26,15 @@ bool OsnmaEngine::SetMerkleRoot(const std::uint8_t* root_32_bytes)
     return trust_store_.SetMerkleRoot(root_32_bytes);
 }
 
+bool OsnmaEngine::AddTrustedPublicKey(const OsnmaDsmPkr& public_key)
+{
+    GnssTime time{};
+    time.wn = 0;
+    time.tow = 0.0;
+
+    return trust_store_.AddTrustedPublicKey(public_key, time);
+}
+
 bool OsnmaEngine::FeedNavigationPage(const GalileoInavPageParts& page,
     AuthReason& reason_out)
 {
