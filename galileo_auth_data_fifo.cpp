@@ -259,6 +259,7 @@ bool GalileoInavDecoder::DecodeCedStatus(
     out.navigation_time = navigation_time;
     out.authentication_time = authentication_time;
     out.wt1_page_time = candidate.words[GAL_WT1].page_epoch;
+    out.wt5_page_time = candidate.words[GAL_WT5].page_epoch;
     out.prn = candidate.prn;
     out.auth_bits = auth_bits;
     out.nav_fingerprint = nav_fingerprint;
@@ -426,6 +427,8 @@ bool GalileoInavDecoder::DecodeTiming(
 
     out.navigation_time = navigation_time;
     out.authentication_time = authentication_time;
+    out.wt6_page_time = candidate.words[GAL_WT6].page_epoch;
+    out.wt10_page_time = candidate.words[GAL_WT10].page_epoch;
     out.prn = candidate.prn;
     out.auth_bits = auth_bits;
     out.nav_fingerprint = nav_fingerprint;

@@ -27,9 +27,11 @@ struct GalileoAuthenticatedCedStatus
     GnssTime navigation_time{};
     GnssTime authentication_time{};
 
-    // Reception epoch of the authenticated WT1. Used as the RINEX
-    // transmission time of message when producing comparison dumps.
+    // Reception epochs of the authenticated WT1 and WT5. WT1 is used
+    // as the ephemeris transmission time and WT5 as the NeQuick-G
+    // ionosphere-data transmission time in RINEX navigation output.
     GnssTime wt1_page_time{};
+    GnssTime wt5_page_time{};
 
     int32_t prn = -1;
     std::int64_t auth_bits = 0;
@@ -82,6 +84,11 @@ struct GalileoAuthenticatedTiming
 
     bool utc_valid = false;
     bool ggto_valid = false;
+
+    // Reception epochs of the authenticated WT6 (GST-UTC) and WT10
+    // (GST-GPS/GGTO) words, used as RINEX STO transmission times.
+    GnssTime wt6_page_time{};
+    GnssTime wt10_page_time{};
 
     GALTimeDecodedType utc{};
 

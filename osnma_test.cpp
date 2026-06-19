@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -21,6 +22,7 @@
 // -json D:\data\osnma\week_1397_24h.jsonl D:\data\osnma\OSNMA_MerkleTree_20251210100000_newPKID_2.xml D:\data\osnma\OSNMA_PublicKey_20251210100000_newPKID_2.xml > d:\data\osnma\jsonout.txt
 // -json D:\data\osnma\week_1397_24h.jsonl D:\data\osnma\OSNMA_MerkleTree_20251210100000_newPKID_2.xml D:\data\osnma\OSNMA_PublicKey_20251210100000_newPKID_2.xml --print-nav > d:\data\osnma\jsonout_nav.txt
 // -json D:\data\osnma\week_1397_24h.jsonl D:\data\osnma\OSNMA_MerkleTree_20251210100000_newPKID_2.xml D:\data\osnma\OSNMA_PublicKey_20251210100000_newPKID_2.xml --rinex-prefix D:\data\osnma\week_1397
+// -json D:\data\osnma\week_1397_24h.jsonl D:\data\osnma\OSNMA_MerkleTree_20251210100000_newPKID_2.xml D:\data\osnma\OSNMA_PublicKey_20251210100000_newPKID_2.xml --rinex4-prefix D:\data\osnma\week_1397
 
 namespace
 {
@@ -42,6 +44,29 @@ namespace
     {
         std::vector<GalileoAuthenticatedCedStatus> ced_status;
         std::vector<GalileoAuthenticatedTiming> timing;
+    };
+
+    struct Rinex4WriteCounts
+    {
+        int32_t ephemeris = 0;
+        int32_t ionosphere = 0;
+        int32_t utc_offset = 0;
+        int32_t ggto_offset = 0;
+    };
+
+    enum class Rinex4RecordKind : int32_t
+    {
+        Ephemeris = 0,
+        Ionosphere = 1,
+        UtcOffset = 2,
+        GgtoOffset = 3
+    };
+
+    struct Rinex4Event
+    {
+        double absolute_gst_seconds = 0.0;
+        Rinex4RecordKind kind = Rinex4RecordKind::Ephemeris;
+        std::size_t record_index = 0;
     };
 
     int32_t GstWeekToRinexWeek(int32_t gst_week)
@@ -114,6 +139,43 @@ namespace
         }
 
         return std::string(buffer);
+    }
+
+    std::string Rinex4Double(double value,
+        int32_t width = 19,
+        int32_t precision = 12)
+    {
+        char format[32]{};
+        char buffer[96]{};
+
+        std::snprintf(format,
+            sizeof(format),
+            "%%%d.%dE",
+            width,
+            precision);
+
+        std::snprintf(buffer,
+            sizeof(buffer),
+            format,
+            value);
+
+        return std::string(buffer);
+    }
+
+    void WriteRinex4Values(std::FILE* out,
+        const double* values,
+        std::size_t value_count)
+    {
+        if (out == nullptr || values == nullptr || value_count == 0)
+            return;
+
+        std::fputs("    ", out);
+        for (std::size_t i = 0; i < value_count; ++i)
+        {
+            const std::string field = Rinex4Double(values[i]);
+            std::fputs(field.c_str(), out);
+        }
+        std::fputc('\n', out);
     }
 
     void WriteRinexFour(std::FILE* out,
@@ -323,6 +385,301 @@ namespace
             }
         }
 
+        return true;
+    }
+
+    double AbsoluteGstSeconds(const GnssTime& time)
+    {
+        if (!IsTimeValid(time))
+            return 0.0;
+
+        return static_cast<double>(time.wn) * SECONDS_PER_WEEK + time.tow;
+    }
+
+    GnssTime PreferredPageEpoch(
+        const GnssTime& page_epoch,
+        const GnssTime& navigation_time)
+    {
+        if (!IsTimeValid(page_epoch))
+            return navigation_time;
+
+        if (!IsTimeValid(navigation_time))
+            return page_epoch;
+
+        // A default-constructed GnssTime is {0,0} and passes IsTimeValid().
+        // Reject such a placeholder when it is clearly unrelated to the
+        // authenticated navigation epoch.
+        if (std::fabs(DiffSeconds(page_epoch, navigation_time)) > 86400.0)
+            return navigation_time;
+
+        return page_epoch;
+    }
+
+    double TransmissionTimeRelativeToWeek(
+        const GnssTime& transmission_time,
+        int32_t reference_gst_week)
+    {
+        if (!IsTimeValid(transmission_time) || reference_gst_week < 0)
+            return RINEX_UNKNOWN_TRANSMISSION_TIME;
+
+        return transmission_time.tow +
+            static_cast<double>(transmission_time.wn - reference_gst_week) *
+            SECONDS_PER_WEEK;
+    }
+
+    bool SameIonosphereModel(
+        const GALIonoDecodedType& a,
+        const GALIonoDecodedType& b)
+    {
+        return a.ai0 == b.ai0 &&
+            a.ai1 == b.ai1 &&
+            a.ai2 == b.ai2 &&
+            a.StormFlags == b.StormFlags;
+    }
+
+    bool SameUtcOffset(
+        const GalileoAuthenticatedTiming& a,
+        const GalileoAuthenticatedTiming& b)
+    {
+        return a.utc.a0 == b.utc.a0 &&
+            a.utc.a1 == b.utc.a1 &&
+            a.utc.T0_UTC == b.utc.T0_UTC &&
+            a.utc.WN0_UTC == b.utc.WN0_UTC;
+    }
+
+    bool SameGgtoOffset(
+        const GalileoAuthenticatedTiming& a,
+        const GalileoAuthenticatedTiming& b)
+    {
+        return a.a0g == b.a0g &&
+            a.a1g == b.a1g &&
+            a.t0g == b.t0g &&
+            a.wn0g == b.wn0g;
+    }
+
+    bool WriteAuthenticatedCedAsRinex4Ephemeris(
+        std::FILE* out,
+        const GalileoAuthenticatedCedStatus& data)
+    {
+        if (out == nullptr || !data.ephemeris_valid)
+            return false;
+
+        const GALEphDecodedType& eph = data.ephemeris;
+        CalendarFields epoch{};
+
+        if (!GstToCalendar(
+            static_cast<int32_t>(eph.WNToc),
+            static_cast<double>(eph.Toc),
+            epoch))
+        {
+            return false;
+        }
+
+        std::fprintf(out, "> EPH E%02d INAV\n", data.prn);
+
+        const std::string af0 = Rinex4Double(eph.af0);
+        const std::string af1 = Rinex4Double(eph.af1);
+        const std::string af2 = Rinex4Double(eph.af2);
+
+        std::fprintf(out,
+            "E%02d %04d %02d %02d %02d %02d %02d%s%s%s\n",
+            data.prn,
+            epoch.year,
+            epoch.month,
+            epoch.day,
+            epoch.hour,
+            epoch.minute,
+            epoch.second,
+            af0.c_str(),
+            af1.c_str(),
+            af2.c_str());
+
+        const double orbit_1[] = {
+            static_cast<double>(eph.IODNav),
+            eph.Crs,
+            eph.DeltaN,
+            eph.M0
+        };
+        WriteRinex4Values(out, orbit_1, 4);
+
+        const double orbit_2[] = {
+            eph.Cuc,
+            eph.Ecc,
+            eph.Cus,
+            eph.sqrtA
+        };
+        WriteRinex4Values(out, orbit_2, 4);
+
+        const double orbit_3[] = {
+            static_cast<double>(eph.Toe),
+            eph.Cic,
+            eph.Omega0,
+            eph.Cis
+        };
+        WriteRinex4Values(out, orbit_3, 4);
+
+        const double orbit_4[] = {
+            eph.i0,
+            eph.Crc,
+            eph.Omega,
+            eph.OmegaDot
+        };
+        WriteRinex4Values(out, orbit_4, 4);
+
+        const double orbit_5[] = {
+            eph.IDot,
+            static_cast<double>(eph.DataSources),
+            static_cast<double>(GstWeekToRinexWeek(
+                static_cast<int32_t>(eph.WNToe)))
+        };
+        WriteRinex4Values(out, orbit_5, 3);
+
+        const double orbit_6[] = {
+            SisaIndexToMeters(data.sisa),
+            static_cast<double>(eph.SVHealth),
+            eph.BGD_L1E5a,
+            eph.BGD_L1E5b
+        };
+        WriteRinex4Values(out, orbit_6, 4);
+
+        const double orbit_7[] = {
+            RinexTransmissionTime(data)
+        };
+        WriteRinex4Values(out, orbit_7, 1);
+
+        return true;
+    }
+
+    bool WriteAuthenticatedCedAsRinex4Ionosphere(
+        std::FILE* out,
+        const GalileoAuthenticatedCedStatus& data)
+    {
+        if (out == nullptr || !data.ionosphere_valid)
+            return false;
+
+        const GnssTime transmission_time =
+            PreferredPageEpoch(data.wt5_page_time, data.navigation_time);
+
+        if (!IsTimeValid(transmission_time))
+            return false;
+
+        CalendarFields epoch{};
+        if (!GstToCalendar(
+            transmission_time.wn,
+            transmission_time.tow,
+            epoch))
+        {
+            return false;
+        }
+
+        std::fprintf(out, "> ION E%02d IFNV\n", data.prn);
+
+        const std::string ai0 = Rinex4Double(data.ionosphere.ai0);
+        const std::string ai1 = Rinex4Double(data.ionosphere.ai1);
+        const std::string ai2 = Rinex4Double(data.ionosphere.ai2);
+
+        std::fprintf(out,
+            "    %04d %02d %02d %02d %02d %02d%s%s%s\n",
+            epoch.year,
+            epoch.month,
+            epoch.day,
+            epoch.hour,
+            epoch.minute,
+            epoch.second,
+            ai0.c_str(),
+            ai1.c_str(),
+            ai2.c_str());
+
+        const double flags[] = {
+            static_cast<double>(data.ionosphere.StormFlags)
+        };
+        WriteRinex4Values(out, flags, 1);
+        return true;
+    }
+
+    bool WriteAuthenticatedTimingAsRinex4UtcOffset(
+        std::FILE* out,
+        const GalileoAuthenticatedTiming& data)
+    {
+        if (out == nullptr || !data.utc_valid)
+            return false;
+
+        CalendarFields epoch{};
+        if (!GstToCalendar(
+            data.utc.WN0_UTC,
+            static_cast<double>(data.utc.T0_UTC),
+            epoch))
+        {
+            return false;
+        }
+
+        std::fprintf(out, "> STO E%02d IFNV\n", data.prn);
+        std::fprintf(out,
+            "    %04d %02d %02d %02d %02d %02d %-18.18s %-18.18s %-18.18s\n",
+            epoch.year,
+            epoch.month,
+            epoch.day,
+            epoch.hour,
+            epoch.minute,
+            epoch.second,
+            "GAUT",
+            "",
+            "UTCGAL");
+
+        const double values[] = {
+            TransmissionTimeRelativeToWeek(
+                PreferredPageEpoch(
+                    data.wt6_page_time,
+                    data.navigation_time),
+                data.utc.WN0_UTC),
+            data.utc.a0,
+            data.utc.a1,
+            0.0
+        };
+        WriteRinex4Values(out, values, 4);
+        return true;
+    }
+
+    bool WriteAuthenticatedTimingAsRinex4GgtoOffset(
+        std::FILE* out,
+        const GalileoAuthenticatedTiming& data)
+    {
+        if (out == nullptr || !data.ggto_valid)
+            return false;
+
+        CalendarFields epoch{};
+        if (!GstToCalendar(
+            data.wn0g,
+            static_cast<double>(data.t0g),
+            epoch))
+        {
+            return false;
+        }
+
+        std::fprintf(out, "> STO E%02d IFNV\n", data.prn);
+        std::fprintf(out,
+            "    %04d %02d %02d %02d %02d %02d %-18.18s %-18.18s %-18.18s\n",
+            epoch.year,
+            epoch.month,
+            epoch.day,
+            epoch.hour,
+            epoch.minute,
+            epoch.second,
+            "GAGP",
+            "",
+            "");
+
+        const double values[] = {
+            TransmissionTimeRelativeToWeek(
+                PreferredPageEpoch(
+                    data.wt10_page_time,
+                    data.navigation_time),
+                data.wn0g),
+            data.a0g,
+            data.a1g,
+            0.0
+        };
+        WriteRinex4Values(out, values, 4);
         return true;
     }
 
@@ -677,6 +1034,252 @@ namespace
         filename_written = filename.string();
         return true;
     }
+
+    std::filesystem::path MakeRinex4OutputFilename(
+        const char* prefix)
+    {
+        const std::filesystem::path prefix_path(
+            prefix != nullptr ? prefix : "");
+
+        const std::string filename =
+            prefix_path.filename().string() + "_osnma_nav4.rnx";
+
+        return prefix_path.parent_path() / filename;
+    }
+
+    void WriteRinex4FileHeader(
+        std::FILE* out,
+        const AuthenticatedNavigationRecords& records)
+    {
+        WriteHeaderStyleLine(out,
+            "     4.02           N: GNSS NAV DATA    E: GALILEO",
+            "RINEX VERSION / TYPE");
+
+        char program_line[128]{};
+        const std::string utc_date = CurrentUtcRinexDate();
+        std::snprintf(program_line,
+            sizeof(program_line),
+            "%-20.20s%-20.20s%-20.20s",
+            "OSNMALIB",
+            "OSNMA",
+            utc_date.c_str());
+        WriteHeaderStyleLine(out, program_line, "PGM / RUN BY / DATE");
+
+        WriteHeaderStyleLine(out,
+            "GALILEO I/NAV DATA AUTHENTICATED BY OSNMA",
+            "COMMENT");
+        WriteHeaderStyleLine(out,
+            "RINEX 4.02 EPH, ION NEQUICK-G AND STO RECORDS",
+            "COMMENT");
+        WriteHeaderStyleLine(out,
+            "ONLY VALID AUTHENTICATED NAVIGATION DATA ARE WRITTEN",
+            "COMMENT");
+
+        for (const GalileoAuthenticatedTiming& timing : records.timing)
+        {
+            if (!timing.utc_valid)
+                continue;
+
+            char content[160]{};
+            std::snprintf(content,
+                sizeof(content),
+                "%6d%6d%6d%6d%3s",
+                timing.utc.DeltaT_LS,
+                timing.utc.DeltaT_LSF,
+                GstWeekToRinexWeek(timing.utc.WN_LSF),
+                timing.utc.DN_LSF,
+                "E");
+            WriteHeaderStyleLine(out, content, "LEAP SECONDS");
+            break;
+        }
+
+        WriteHeaderStyleLine(out, "", "END OF HEADER");
+    }
+
+    bool WriteAuthenticatedNavigationRinex4File(
+        const AuthenticatedNavigationRecords& records,
+        const char* prefix,
+        std::string& filename_written,
+        Rinex4WriteCounts& counts)
+    {
+        filename_written.clear();
+        counts = Rinex4WriteCounts{};
+
+        if (prefix == nullptr || prefix[0] == '\0')
+            return false;
+
+        const std::filesystem::path filename =
+            MakeRinex4OutputFilename(prefix);
+
+        std::error_code ec{};
+        const std::filesystem::path parent = filename.parent_path();
+        if (!parent.empty())
+            std::filesystem::create_directories(parent, ec);
+
+        if (ec)
+            return false;
+
+        std::FILE* out = OpenTextFileForWriting(filename);
+        if (out == nullptr)
+            return false;
+
+        WriteRinex4FileHeader(out, records);
+
+        std::vector<Rinex4Event> events{};
+        events.reserve(records.ced_status.size() * 2u +
+            records.timing.size() * 2u);
+
+        for (std::size_t i = 0; i < records.ced_status.size(); ++i)
+        {
+            const GalileoAuthenticatedCedStatus& ced =
+                records.ced_status[i];
+
+            if (ced.ephemeris_valid)
+            {
+                events.push_back(Rinex4Event{
+                    AbsoluteGstSeconds(PreferredPageEpoch(
+                        ced.wt1_page_time,
+                        ced.navigation_time)),
+                    Rinex4RecordKind::Ephemeris,
+                    i});
+            }
+
+            if (ced.ionosphere_valid)
+            {
+                events.push_back(Rinex4Event{
+                    AbsoluteGstSeconds(PreferredPageEpoch(
+                        ced.wt5_page_time,
+                        ced.navigation_time)),
+                    Rinex4RecordKind::Ionosphere,
+                    i});
+            }
+        }
+
+        for (std::size_t i = 0; i < records.timing.size(); ++i)
+        {
+            const GalileoAuthenticatedTiming& timing = records.timing[i];
+
+            if (timing.utc_valid)
+            {
+                events.push_back(Rinex4Event{
+                    AbsoluteGstSeconds(PreferredPageEpoch(
+                        timing.wt6_page_time,
+                        timing.navigation_time)),
+                    Rinex4RecordKind::UtcOffset,
+                    i});
+            }
+
+            if (timing.ggto_valid)
+            {
+                events.push_back(Rinex4Event{
+                    AbsoluteGstSeconds(PreferredPageEpoch(
+                        timing.wt10_page_time,
+                        timing.navigation_time)),
+                    Rinex4RecordKind::GgtoOffset,
+                    i});
+            }
+        }
+
+        std::stable_sort(events.begin(), events.end(),
+            [](const Rinex4Event& a, const Rinex4Event& b)
+            {
+                if (a.absolute_gst_seconds != b.absolute_gst_seconds)
+                    return a.absolute_gst_seconds < b.absolute_gst_seconds;
+
+                if (a.kind != b.kind)
+                {
+                    return static_cast<int32_t>(a.kind) <
+                        static_cast<int32_t>(b.kind);
+                }
+
+                return a.record_index < b.record_index;
+            });
+
+        bool have_last_iono = false;
+        GALIonoDecodedType last_iono{};
+
+        bool have_last_utc = false;
+        GalileoAuthenticatedTiming last_utc{};
+
+        bool have_last_ggto = false;
+        GalileoAuthenticatedTiming last_ggto{};
+
+        for (const Rinex4Event& event : events)
+        {
+            switch (event.kind)
+            {
+            case Rinex4RecordKind::Ephemeris:
+            {
+                const GalileoAuthenticatedCedStatus& ced =
+                    records.ced_status[event.record_index];
+                if (WriteAuthenticatedCedAsRinex4Ephemeris(out, ced))
+                    ++counts.ephemeris;
+                break;
+            }
+
+            case Rinex4RecordKind::Ionosphere:
+            {
+                const GalileoAuthenticatedCedStatus& ced =
+                    records.ced_status[event.record_index];
+
+                if (have_last_iono &&
+                    SameIonosphereModel(last_iono, ced.ionosphere))
+                {
+                    break;
+                }
+
+                if (WriteAuthenticatedCedAsRinex4Ionosphere(out, ced))
+                {
+                    last_iono = ced.ionosphere;
+                    have_last_iono = true;
+                    ++counts.ionosphere;
+                }
+                break;
+            }
+
+            case Rinex4RecordKind::UtcOffset:
+            {
+                const GalileoAuthenticatedTiming& timing =
+                    records.timing[event.record_index];
+
+                if (have_last_utc && SameUtcOffset(last_utc, timing))
+                    break;
+
+                if (WriteAuthenticatedTimingAsRinex4UtcOffset(out, timing))
+                {
+                    last_utc = timing;
+                    have_last_utc = true;
+                    ++counts.utc_offset;
+                }
+                break;
+            }
+
+            case Rinex4RecordKind::GgtoOffset:
+            {
+                const GalileoAuthenticatedTiming& timing =
+                    records.timing[event.record_index];
+
+                if (have_last_ggto && SameGgtoOffset(last_ggto, timing))
+                    break;
+
+                if (WriteAuthenticatedTimingAsRinex4GgtoOffset(out, timing))
+                {
+                    last_ggto = timing;
+                    have_last_ggto = true;
+                    ++counts.ggto_offset;
+                }
+                break;
+            }
+            }
+        }
+
+        const bool close_ok = (std::fclose(out) == 0);
+        if (!close_ok)
+            return false;
+
+        filename_written = filename.string();
+        return true;
+    }
 }
 
 static void PrintUsage(const char* exe_name)
@@ -698,12 +1301,15 @@ static void PrintUsage(const char* exe_name)
     printf("      --print-nav\n");
     printf("          Appends the authenticated navigation comparison dump to stdout.\n");
     printf("      --rinex-prefix <prefix>\n");
-    printf("          Writes a dedicated RINEX file named <prefix>_osnma_nav.rnx.\n");
+    printf("          Writes a dedicated RINEX 3.05 file named <prefix>_osnma_nav.rnx.\n");
+    printf("      --rinex4-prefix <prefix>\n");
+    printf("          Writes a dedicated RINEX 4.02 file named <prefix>_osnma_nav4.rnx.\n");
     printf("\n");
     printf("Examples:\n");
     printf("  %s -tv \"D:\\data\\osnma\\Test_vectors\"\n", exe);
     printf("  %s -json week_1397_24h.jsonl OSNMA_MerkleTree_20251210100000_newPKID_2.xml OSNMA_PublicKey_20251210100000_newPKID_2.xml --print-nav\n", exe);
     printf("  %s -json week_1397_24h.jsonl OSNMA_MerkleTree_20251210100000_newPKID_2.xml OSNMA_PublicKey_20251210100000_newPKID_2.xml --rinex-prefix D:\\data\\osnma\\week_1397\n", exe);
+    printf("  %s -json week_1397_24h.jsonl OSNMA_MerkleTree_20251210100000_newPKID_2.xml OSNMA_PublicKey_20251210100000_newPKID_2.xml --rinex4-prefix D:\\data\\osnma\\week_1397\n", exe);
 }
 
 static void PrintXmlMaterialStats(const OsnmaXmlMaterialLoader::Stats& s)
@@ -1035,7 +1641,8 @@ static int RunJsonMode(const char* jsonl_filename,
     const char* merkle_tree_xml,
     const char* public_key_xml,
     bool print_navigation,
-    const char* rinex_prefix)
+    const char* rinex_prefix,
+    const char* rinex4_prefix)
 {
     if (jsonl_filename == nullptr || jsonl_filename[0] == '\0' ||
         merkle_tree_xml == nullptr || merkle_tree_xml[0] == '\0' ||
@@ -1098,7 +1705,8 @@ static int RunJsonMode(const char* jsonl_filename,
     PrintOsnmaEngineStatistics(engine_stats);
 
     if (print_navigation ||
-        (rinex_prefix != nullptr && rinex_prefix[0] != '\0'))
+        (rinex_prefix != nullptr && rinex_prefix[0] != '\0') ||
+        (rinex4_prefix != nullptr && rinex4_prefix[0] != '\0'))
     {
         const AuthenticatedNavigationRecords records =
             CollectAuthenticatedNavigation(auth);
@@ -1123,6 +1731,32 @@ static int RunJsonMode(const char* jsonl_filename,
             printf("  file=%s\n", rinex_filename.c_str());
             printf("  authenticated_ephemeris_records=%d\n",
                 rinex_record_count);
+        }
+
+        if (rinex4_prefix != nullptr && rinex4_prefix[0] != '\0')
+        {
+            std::string rinex4_filename{};
+            Rinex4WriteCounts rinex4_counts{};
+
+            if (!WriteAuthenticatedNavigationRinex4File(
+                records,
+                rinex4_prefix,
+                rinex4_filename,
+                rinex4_counts))
+            {
+                printf("Failed to write the RINEX 4.02 navigation file for prefix: %s\n",
+                    rinex4_prefix);
+                return 1;
+            }
+
+            printf("\nRINEX 4.02 navigation output:\n");
+            printf("  file=%s\n", rinex4_filename.c_str());
+            printf("  authenticated_ephemeris_records=%d\n",
+                rinex4_counts.ephemeris);
+            printf("  ionosphere_records=%d utc_offset_records=%d ggto_offset_records=%d\n",
+                rinex4_counts.ionosphere,
+                rinex4_counts.utc_offset,
+                rinex4_counts.ggto_offset);
         }
 
         if (print_navigation)
@@ -1176,6 +1810,7 @@ int main(int argc, char** argv)
 
         bool print_navigation = false;
         const char* rinex_prefix = nullptr;
+        const char* rinex4_prefix = nullptr;
 
         for (int32_t arg_index = 5; arg_index < argc; ++arg_index)
         {
@@ -1204,6 +1839,25 @@ int main(int argc, char** argv)
                 continue;
             }
 
+            if (std::strcmp(argv[arg_index], "--rinex4-prefix") == 0)
+            {
+                if (arg_index + 1 >= argc)
+                {
+                    printf("Missing value after --rinex4-prefix.\n\n");
+                    PrintUsage(argv[0]);
+                    return 1;
+                }
+
+                rinex4_prefix = argv[++arg_index];
+                if (rinex4_prefix[0] == '\0')
+                {
+                    printf("Empty --rinex4-prefix value.\n\n");
+                    PrintUsage(argv[0]);
+                    return 1;
+                }
+                continue;
+            }
+
             printf("Unknown -json option: %s\n\n", argv[arg_index]);
             PrintUsage(argv[0]);
             return 1;
@@ -1211,7 +1865,8 @@ int main(int argc, char** argv)
 
         return RunJsonMode(argv[2], argv[3], argv[4],
             print_navigation,
-            rinex_prefix);
+            rinex_prefix,
+            rinex4_prefix);
     }
 
     printf("Unknown option: %s\n\n", argv[1]);
