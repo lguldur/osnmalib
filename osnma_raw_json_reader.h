@@ -57,6 +57,14 @@ public:
         int32_t null_page_count = 0;
 
         std::array<int32_t, 64> wt_count{};
+
+        // JSONL files may contain 30-second subframe records out of order.
+        // The reader reorders them before feeding pages to the caller.
+        int32_t reorder_buffered_subframes = 0;
+        int32_t reorder_flushed_subframes = 0;
+        int32_t reorder_max_buffered_subframes = 0;
+        int32_t reorder_out_of_order_subframes = 0;
+        int32_t reorder_max_lateness_s = 0;
     };
 
     using PageCallback =

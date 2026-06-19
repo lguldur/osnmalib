@@ -1,11 +1,97 @@
 #include "osnma_raw_json_reader.h"
 #include "osnma_bit_utils.h"
 
+#include <algorithm>
 #include <cctype>
+#include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <limits>
+#include <map>
 #include <regex>
 #include <string>
+#include <vector>
+
+namespace
+{
+    constexpr int64_t GST_WEEK_SECONDS = 604800;
+
+    // The observed OSNMAlib JSONL files are written in chunks that are
+    // internally reverse-ordered. A 5-minute watermark is enough for the
+    // current files, and still tiny in memory.
+    constexpr int64_t JSON_REORDER_WINDOW_SECONDS = 300;
+    constexpr int32_t JSON_REORDER_MAX_BUFFERED_SUBFRAMES = 64;
+
+    struct JsonLineGst
+    {
+        int32_t wn = 0;
+        double tow = 0.0;
+    };
+
+    struct JsonPendingSubframe
+    {
+        int64_t gst_seconds = 0;
+        int32_t input_line = 0;
+        std::vector<OsnmaRawJsonReader::Page> pages;
+    };
+
+    static int64_t ToGstSeconds(int32_t wn, double tow)
+    {
+        return static_cast<int64_t>(wn) * GST_WEEK_SECONDS +
+            static_cast<int64_t>(std::llround(tow));
+    }
+
+    static bool ExtractLineGst(const std::string& line, JsonLineGst& out)
+    {
+        // Current OSNMAlib.eu quick JSONL export:
+        //     {"WN":1397,"TOW":150,...}
+        static const std::regex wn_re(
+            R"json("WN"\s*:\s*([0-9]+))json",
+            std::regex::ECMAScript);
+
+        static const std::regex tow_re(
+            R"json("TOW"\s*:\s*([-+]?[0-9]+(?:\.[0-9]+)?))json",
+            std::regex::ECMAScript);
+
+        // Schema-style status log:
+        //     "GST_subframe": [WN, TOW]
+        static const std::regex gst_subframe_re(
+            R"json("GST_subframe"\s*:\s*\[\s*([0-9]+)\s*,\s*([-+]?[0-9]+(?:\.[0-9]+)?)\s*\])json",
+            std::regex::ECMAScript);
+
+        std::smatch m{};
+
+        if (std::regex_search(line, m, gst_subframe_re) && m.size() >= 3)
+        {
+            out.wn = static_cast<int32_t>(std::stoi(m[1].str()));
+            out.tow = std::stod(m[2].str());
+            return true;
+        }
+
+        if (!std::regex_search(line, m, wn_re) || m.size() < 2)
+            return false;
+
+        out.wn = static_cast<int32_t>(std::stoi(m[1].str()));
+
+        if (!std::regex_search(line, m, tow_re) || m.size() < 2)
+            return false;
+
+        out.tow = std::stod(m[1].str());
+        return true;
+    }
+
+    static int32_t CountBufferedSubframes(
+        const std::map<int64_t, std::vector<JsonPendingSubframe>>& buffer)
+    {
+        int32_t count = 0;
+
+        for (const auto& kv : buffer)
+            count += static_cast<int32_t>(kv.second.size());
+
+        return count;
+    }
+}
 
 bool OsnmaRawJsonReader::ReadFile(const char* filename,
     PageCallback callback,
@@ -28,6 +114,71 @@ bool OsnmaRawJsonReader::ReadFile(const char* filename,
     if (!in.is_open())
         return false;
 
+    std::map<int64_t, std::vector<JsonPendingSubframe>> reorder_buffer;
+    int64_t newest_seen = std::numeric_limits<int64_t>::min();
+    bool have_newest_seen = false;
+
+    auto flush_one_oldest = [&]() -> bool
+    {
+        if (reorder_buffer.empty())
+            return true;
+
+        auto it = reorder_buffer.begin();
+        std::vector<JsonPendingSubframe> pending_list = std::move(it->second);
+        reorder_buffer.erase(it);
+
+        std::sort(pending_list.begin(),
+            pending_list.end(),
+            [](const JsonPendingSubframe& a, const JsonPendingSubframe& b)
+            {
+                return a.input_line < b.input_line;
+            });
+
+        for (const JsonPendingSubframe& pending : pending_list)
+        {
+            ++local_stats.reorder_flushed_subframes;
+
+            for (const Page& page : pending.pages)
+            {
+                if (!callback(page))
+                    return false;
+            }
+        }
+
+        return true;
+    };
+
+    auto update_max_depth = [&]()
+    {
+        const int32_t depth = CountBufferedSubframes(reorder_buffer);
+        if (depth > local_stats.reorder_max_buffered_subframes)
+            local_stats.reorder_max_buffered_subframes = depth;
+    };
+
+    auto flush_ready = [&]() -> bool
+    {
+        while (!reorder_buffer.empty())
+        {
+            const int64_t oldest = reorder_buffer.begin()->first;
+            const int32_t depth = CountBufferedSubframes(reorder_buffer);
+
+            const bool watermark_ready =
+                have_newest_seen &&
+                ((newest_seen - oldest) >= JSON_REORDER_WINDOW_SECONDS);
+
+            const bool buffer_too_deep =
+                depth > JSON_REORDER_MAX_BUFFERED_SUBFRAMES;
+
+            if (!watermark_ready && !buffer_too_deep)
+                break;
+
+            if (!flush_one_oldest())
+                return false;
+        }
+
+        return true;
+    };
+
     std::string line;
 
     while (std::getline(in, line))
@@ -37,13 +188,59 @@ bool OsnmaRawJsonReader::ReadFile(const char* filename,
         if (line.empty())
             continue;
 
+        JsonLineGst gst{};
+        if (!ExtractLineGst(line, gst))
+        {
+            ++local_stats.malformed_line_count;
+            continue;
+        }
+
+        const int64_t line_gst_seconds = ToGstSeconds(gst.wn, gst.tow);
+
+        if (have_newest_seen && line_gst_seconds < newest_seen)
+        {
+            ++local_stats.reorder_out_of_order_subframes;
+
+            const int64_t lateness = newest_seen - line_gst_seconds;
+            if (lateness > static_cast<int64_t>(local_stats.reorder_max_lateness_s))
+                local_stats.reorder_max_lateness_s = static_cast<int32_t>(lateness);
+        }
+
+        if (!have_newest_seen || line_gst_seconds > newest_seen)
+        {
+            newest_seen = line_gst_seconds;
+            have_newest_seen = true;
+        }
+
+        JsonPendingSubframe pending{};
+        pending.gst_seconds = line_gst_seconds;
+        pending.input_line = local_stats.line_count;
+
         const bool ok =
             ParseLine(line,
-                callback,
+                [&](const Page& page) -> bool
+                {
+                    pending.pages.push_back(page);
+                    return true;
+                },
                 local_stats,
                 raw_to_word_bit_offset);
 
         if (!ok)
+            return false;
+
+        reorder_buffer[line_gst_seconds].push_back(std::move(pending));
+        ++local_stats.reorder_buffered_subframes;
+        update_max_depth();
+
+        if (!flush_ready())
+            return false;
+    }
+
+    // EOF: whatever is left is now safe to flush in chronological order.
+    while (!reorder_buffer.empty())
+    {
+        if (!flush_one_oldest())
             return false;
     }
 
@@ -112,33 +309,15 @@ bool OsnmaRawJsonReader::ParseLine(const std::string& line,
         This intentionally does not try to be a general JSON parser.
     */
 
-    static const std::regex wn_re(
-        R"json("WN"\s*:\s*([0-9]+))json",
-        std::regex::ECMAScript);
-
-    static const std::regex tow_re(
-        R"json("TOW"\s*:\s*([-+]?[0-9]+(?:\.[0-9]+)?))json",
-        std::regex::ECMAScript);
-
-    std::smatch m{};
-
-    if (!std::regex_search(line, m, wn_re) || m.size() < 2)
+    JsonLineGst gst{};
+    if (!ExtractLineGst(line, gst))
     {
         ++stats.malformed_line_count;
         return true;
     }
 
-    const int32_t wn =
-        static_cast<int32_t>(std::stoi(m[1].str()));
-
-    if (!std::regex_search(line, m, tow_re) || m.size() < 2)
-    {
-        ++stats.malformed_line_count;
-        return true;
-    }
-
-    const double tow =
-        std::stod(m[1].str());
+    const int32_t wn = gst.wn;
+    const double tow = gst.tow;
 
     ++stats.subframe_count;
 
@@ -156,10 +335,6 @@ bool OsnmaRawJsonReader::ParseLine(const std::string& line,
 
     static const std::regex e1b_array_re(
         R"json("E1-B"\s*:\s*\[([^\]]*)\])json",
-        std::regex::ECMAScript);
-
-    static const std::regex hex_page_re(
-        R"json("([0-9A-Fa-f]{60})")json",
         std::regex::ECMAScript);
 
             const std::sregex_iterator end{};

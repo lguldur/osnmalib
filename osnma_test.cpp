@@ -94,6 +94,14 @@ static void PrintRawJsonReaderStats(const OsnmaRawJsonReader::Stats& s)
            s.missing_e1b_array_count,
            s.null_page_count);
 
+    printf("  reorder_buffered_subframes=%d reorder_flushed_subframes=%d reorder_max_buffered_subframes=%d\n",
+           s.reorder_buffered_subframes,
+           s.reorder_flushed_subframes,
+           s.reorder_max_buffered_subframes);
+    printf("  reorder_out_of_order_subframes=%d reorder_max_lateness_s=%d\n",
+           s.reorder_out_of_order_subframes,
+           s.reorder_max_lateness_s);
+
     printf("  WT count:");
     for (int32_t i = 0; i < static_cast<int32_t>(s.wt_count.size()); ++i)
     {
