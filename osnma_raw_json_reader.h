@@ -24,8 +24,11 @@ public:
         One 60-hex-character string:
             30 bytes = 240 bits
 
-        For E1-B, current interpretation:
-            OSNMA logical word bit 0 = raw page bit 1
+        For E1-B, the 128-bit Galileo I/NAV word is reconstructed as:
+            raw[2 .. 114] || raw[122 .. 138]
+
+        The OSNMA reserved field is extracted separately from the odd page
+        part and is not part of this reconstructed navigation word.
     */
     struct Page
     {
@@ -75,7 +78,8 @@ public:
         Read a JSONL file and call callback once per decoded E1-B page.
 
         raw_to_word_bit_offset:
-            1 for current OSNMAlib.eu raw page interpretation.
+            Retained for compatibility and for selecting the OSNMA odd-page
+            alignment. It no longer controls the I/NAV word reconstruction.
 
         Returns false only for file-open failure or callback abort.
         Malformed lines/pages are counted and skipped.
@@ -89,12 +93,11 @@ public:
         Convenience bridge for quick testing:
             JSONL file -> E1-B pages -> OsnmaAuthenticator::FeedRawInavPage()
 
-        The raw JSON page is split into two internal 128-bit software buffers:
-            even_128b starts at raw bit 1
-            odd_128b  starts at raw bit 121
+        The raw JSON page is converted into two internal software buffers:
+            even_128b = raw[2 .. 114] || raw[122 .. 138]
+            odd_128b  = the odd page part containing the OSNMA reserved field
 
-        The odd buffer contains only the available 119 bits; the remaining bits
-        stay zero.
+        The remaining unused bits in odd_128b stay zero.
     */
     static bool FeedFileToAuthenticator(const char* filename,
         OsnmaAuthenticator& authenticator,
@@ -113,6 +116,9 @@ private:
     static bool HexToBytes(const std::string& hex,
         std::uint8_t* out,
         int32_t out_size_bytes);
+
+    static bool CopyInavWordFromRawPage(const std::uint8_t* raw_240b,
+        std::uint8_t* dst_128b);
 
     static bool CopyBitsMsb0Shifted(const std::uint8_t* src,
         int32_t src_bit_offset,

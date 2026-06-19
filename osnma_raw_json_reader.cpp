@@ -20,7 +20,7 @@ namespace
     // The observed OSNMAlib JSONL files are written in chunks that are
     // internally reverse-ordered. A 5-minute watermark is enough for the
     // current files, and still tiny in memory.
-    constexpr int64_t JSON_REORDER_WINDOW_SECONDS = 300;
+    constexpr int64_t JSON_REORDER_WINDOW_SECONDS = 600;
     constexpr int32_t JSON_REORDER_MAX_BUFFERED_SUBFRAMES = 64;
 
     struct JsonLineGst
@@ -401,25 +401,34 @@ bool OsnmaRawJsonReader::ParseLine(const std::string& line,
 
                         static constexpr int32_t RAW_HALF_BITS = 120;
 
-                        const int32_t even_offset =
-                            raw_to_word_bit_offset;
+                        /*
+                            Reconstruct the 128-bit Galileo I/NAV word from
+                            the two 120-bit page parts. The navigation word is
+                            not a contiguous slice of the 240-bit raw page:
 
-                        const int32_t odd_offset =
-                            RAW_HALF_BITS - 1;
+                                raw[2 .. 114] || raw[122 .. 138]
 
-                        const int32_t odd_bit_count =
-                            RAW_PAGE_BITS - odd_offset;
-
-                        if (!CopyBitsMsb0Shifted(page.raw_240b.data(),
-                            even_offset,
-                            RAW_PAGE_BITS,
-                            page.even_128b.data(),
-                            odd_bit_count))
+                            The previous JSON reader copied a contiguous slice
+                            starting at raw bit 1. That still exposed the OSNMA
+                            reserved field correctly, so DSM/KROOT/TESLA could
+                            verify, but it shifted/corrupted the navigation data
+                            used in ADKD0/4/12 tag MAC inputs.
+                        */
+                        if (!CopyInavWordFromRawPage(page.raw_240b.data(),
+                            page.even_128b.data()))
                         {
                             ++stats.malformed_hex_count;
                             ++page_index;
                             continue;
                         }
+
+                        const int32_t odd_offset =
+                            (raw_to_word_bit_offset == 0)
+                            ? RAW_HALF_BITS
+                            : RAW_HALF_BITS - 1;
+
+                        const int32_t odd_bit_count =
+                            RAW_PAGE_BITS - odd_offset;
 
                         if (odd_bit_count <= 0 || odd_bit_count > OSNMA_WORD_BITS)
                         {
@@ -501,6 +510,26 @@ bool OsnmaRawJsonReader::HexToBytes(const std::string& hex,
         out[i] =
             static_cast<std::uint8_t>((hi << 4) | lo);
     }
+
+    return true;
+}
+
+
+bool OsnmaRawJsonReader::CopyInavWordFromRawPage(const std::uint8_t* raw_240b,
+    std::uint8_t* dst_128b)
+{
+    if (raw_240b == nullptr || dst_128b == nullptr)
+        return false;
+
+    std::memset(dst_128b, 0, OSNMA_WORD_BYTES);
+
+    // Galileo I/NAV word contents: 112 bits from the even page part,
+    // followed by 16 bits from the odd page part.
+    for (int32_t i = 0; i < 112; ++i)
+        SetBitMsb0(dst_128b, i, GetBitMsb0(raw_240b, 2 + i));
+
+    for (int32_t i = 0; i < 16; ++i)
+        SetBitMsb0(dst_128b, 112 + i, GetBitMsb0(raw_240b, 122 + i));
 
     return true;
 }
