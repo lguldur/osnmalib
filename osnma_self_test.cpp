@@ -657,6 +657,28 @@ bool OsnmaSelfTest::TestAuthenticatedCedDecode(Result& result)
         return false;
     }
 
+    if (!Check(result, decoded.ephemeris.DataSources == 513u,
+        "authenticated RINEX data-source decode failed"))
+    {
+        return false;
+    }
+
+    // E1-B DVS=0, E1-B SHS=1, E5b DVS=1, E5b SHS=2.
+    // RINEX bits: (1 << 1) + (1 << 6) + (2 << 7) = 322.
+    if (!Check(result, decoded.ephemeris.SVHealth == 322u,
+        "authenticated RINEX health packing failed"))
+    {
+        return false;
+    }
+
+    if (!Check(result,
+        decoded.wt1_page_time.wn == MakeTestTime().wn &&
+        std::fabs(decoded.wt1_page_time.tow - MakeTestTime().tow) < 1e-12,
+        "authenticated WT1 page time was not preserved"))
+    {
+        return false;
+    }
+
     if (!Check(result,
         std::fabs(decoded.ionosphere.ai0 - 1.0) < 1e-15,
         "authenticated ionosphere ai0 decode failed"))

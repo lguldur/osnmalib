@@ -15,6 +15,13 @@ namespace
     constexpr unsigned long GAL_SOURCE_INAV = 1u;
     constexpr unsigned char GAL_SOURCE_INAV_U8 = 1u;
 
+    // RINEX 3.05 Galileo data-source field for an I/NAV message decoded
+    // from E1-B, with clock parameters valid for the E5b/E1 pair:
+    //   bit 0 = I/NAV E1-B
+    //   bit 9 = af0-af2, Toc and SISA valid for E5b/E1
+    constexpr unsigned long GAL_RINEX_DATA_SOURCES_INAV_E1B =
+        (1u << 0) | (1u << 9);
+
     double ScaleSigned(const std::uint8_t* data,
         int32_t first_bit,
         int32_t bit_count,
@@ -91,24 +98,25 @@ namespace
         return week;
     }
 
-    std::uint32_t PackHealth(std::uint8_t e5b_shs,
+    std::uint32_t PackRinexHealth(std::uint8_t e5b_shs,
         std::uint8_t e1b_shs,
         bool e5b_dvs,
         bool e1b_dvs)
     {
         /*
-            Local unambiguous packing of the six WT5 status bits:
+            RINEX 3.05 Galileo SV-health bit allocation:
 
-                bits 5..4 = E5b SHS
-                bits 3..2 = E1-B SHS
-                bit  1    = E5b DVS
-                bit  0    = E1-B DVS
+                bit 0    = E1-B DVS
+                bits 1-2 = E1-B SHS
+                bits 3-5 = E5a fields (not available from I/NAV here)
+                bit 6    = E5b DVS
+                bits 7-8 = E5b SHS
         */
         return
-            ((static_cast<std::uint32_t>(e5b_shs) & 0x03u) << 4) |
-            ((static_cast<std::uint32_t>(e1b_shs) & 0x03u) << 2) |
-            (e5b_dvs ? 0x02u : 0u) |
-            (e1b_dvs ? 0x01u : 0u);
+            (e1b_dvs ? (1u << 0) : 0u) |
+            ((static_cast<std::uint32_t>(e1b_shs) & 0x03u) << 1) |
+            (e5b_dvs ? (1u << 6) : 0u) |
+            ((static_cast<std::uint32_t>(e5b_shs) & 0x03u) << 7);
     }
 
     bool IsAllOnes(std::uint64_t value,
@@ -250,6 +258,7 @@ bool GalileoInavDecoder::DecodeCedStatus(
 
     out.navigation_time = navigation_time;
     out.authentication_time = authentication_time;
+    out.wt1_page_time = candidate.words[GAL_WT1].page_epoch;
     out.prn = candidate.prn;
     out.auth_bits = auth_bits;
     out.nav_fingerprint = nav_fingerprint;
@@ -352,10 +361,10 @@ bool GalileoInavDecoder::DecodeCedStatus(
     out.e1b_dvs = GetBitMsb0(wt5, 72);
 
     eph.HealthAndSisaInBinary = true;
-    eph.DataSources = GAL_SOURCE_INAV;
+    eph.DataSources = GAL_RINEX_DATA_SOURCES_INAV_E1B;
     eph.SISA = static_cast<unsigned long>(out.sisa);
     eph.SVHealth = static_cast<unsigned long>(
-        PackHealth(out.e5b_shs,
+        PackRinexHealth(out.e5b_shs,
             out.e1b_shs,
             out.e5b_dvs,
             out.e1b_dvs));

@@ -27,6 +27,10 @@ struct GalileoAuthenticatedCedStatus
     GnssTime navigation_time{};
     GnssTime authentication_time{};
 
+    // Reception epoch of the authenticated WT1. Used as the RINEX
+    // transmission time of message when producing comparison dumps.
+    GnssTime wt1_page_time{};
+
     int32_t prn = -1;
     std::int64_t auth_bits = 0;
     std::uint64_t nav_fingerprint = 0;
