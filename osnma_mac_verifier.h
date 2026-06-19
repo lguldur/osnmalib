@@ -56,6 +56,13 @@ public:
             int32_t tag_bits = 0;
             GnssTime nav_time{};
             std::uint64_t nav_fingerprint = 0;
+
+            /*
+                Non-owning pointer to the exact candidate used to build the
+                verified MAC input. OsnmaEngine consumes it synchronously,
+                before the navigation candidate store is modified again.
+            */
+            const GalileoNavCandidate* nav_candidate = nullptr;
         };
 
         static constexpr int32_t MAX_SUCCESS_RECORDS = 8;
@@ -94,7 +101,8 @@ private:
         int32_t tag_index,
         int32_t tag_bits,
         const GnssTime& nav_time,
-        std::uint64_t nav_fingerprint);
+        std::uint64_t nav_fingerprint,
+        const GalileoNavCandidate& nav_candidate);
 
     static bool BuildMacseqInput(const OsnmaMackMessage& mack,
         int32_t maclt,

@@ -30,6 +30,8 @@ private:
     static bool TestMacseqValidThenMissingNavData(Result& result);
     static bool TestMacseqRejectsWrongMacseq(Result& result);
     static bool TestMacseqWaitsForFutureKey(Result& result);
+    static bool TestAuthenticatedCedDecode(Result& result);
+    static bool TestAuthenticatedTimingDecode(Result& result);
 
     static void Fail(Result& result,
         const char* message);

@@ -18,6 +18,7 @@ void OsnmaEngine::Reset()
         p = PendingMack{};
 
     authenticated_objects_.clear();
+    authenticated_nav_data_.Reset();
 
     statistics_ = Statistics{};
 }
@@ -25,6 +26,28 @@ void OsnmaEngine::Reset()
 const OsnmaEngine::Statistics& OsnmaEngine::GetStatistics() const
 {
     return statistics_;
+}
+
+bool OsnmaEngine::PopAuthenticatedCedStatus(
+    GalileoAuthenticatedCedStatus& data)
+{
+    return authenticated_nav_data_.PopCedStatus(data);
+}
+
+bool OsnmaEngine::PopAuthenticatedTiming(
+    GalileoAuthenticatedTiming& data)
+{
+    return authenticated_nav_data_.PopTiming(data);
+}
+
+int32_t OsnmaEngine::AuthenticatedCedStatusCount() const
+{
+    return authenticated_nav_data_.CedStatusCount();
+}
+
+int32_t OsnmaEngine::AuthenticatedTimingCount() const
+{
+    return authenticated_nav_data_.TimingCount();
 }
 
 void OsnmaEngine::SetNavTimingMode(NavTimingMode mode)
@@ -482,7 +505,11 @@ void OsnmaEngine::UpdatePendingMackStatistics()
         statistics_.pending_macks_max_seen = count;
 }
 
-void OsnmaEngine::RegisterMacSuccesses(const OsnmaMacVerifier::Result& mac_result)
+void OsnmaEngine::RegisterMacSuccesses(
+    const OsnmaMacVerifier::Result& mac_result,
+    const GnssTime& authentication_time,
+    NavSignalSource source,
+    int32_t raw_source)
 {
     for (int32_t i = 0;
         i < mac_result.success_count &&
@@ -492,8 +519,12 @@ void OsnmaEngine::RegisterMacSuccesses(const OsnmaMacVerifier::Result& mac_resul
         const OsnmaMacVerifier::Result::SuccessRecord& success =
             mac_result.success_records[i];
 
-        if (success.prnd <= 0 || !IsTimeValid(success.nav_time))
+        if (success.prnd <= 0 ||
+            !IsTimeValid(success.nav_time) ||
+            success.nav_candidate == nullptr)
+        {
             continue;
+        }
 
         const AuthenticatedObjectKey key =
             std::make_tuple(success.prnd,
@@ -514,12 +545,45 @@ void OsnmaEngine::RegisterMacSuccesses(const OsnmaMacVerifier::Result& mac_resul
 
         ++statistics_.authenticated_object_updates;
 
-        if (success.adkd == OsnmaAdkd::InavCed)
+        if (success.adkd == OsnmaAdkd::InavCed ||
+            success.adkd == OsnmaAdkd::SlowMac)
         {
-            ++statistics_.authenticated_ced_status_objects;
+            if (success.adkd == OsnmaAdkd::InavCed)
+                ++statistics_.authenticated_ced_status_objects;
+            else
+                ++statistics_.authenticated_slow_mac_objects;
+
+            GalileoAuthenticatedCedStatus nav_data{};
+
+            if (GalileoInavDecoder::DecodeCedStatus(
+                *success.nav_candidate,
+                success.nav_time,
+                authentication_time,
+                state.auth_bits,
+                success.nav_fingerprint,
+                source,
+                raw_source,
+                nav_data))
+            {
+                nav_data.authentication_adkd = success.adkd;
+                authenticated_nav_data_.PushCedStatus(nav_data);
+                ++statistics_.authenticated_ced_status_output;
+
+                if (nav_data.ephemeris_valid)
+                {
+                    ++statistics_.authenticated_ephemeris_output;
+                }
+
+                if (nav_data.ionosphere_valid)
+                {
+                    ++statistics_.authenticated_ionosphere_output;
+                }
+            }
+
             printf("OSNMA auth: new CED and status for E%02d authenticated "
-                "(authbits=%lld, GST={wn=%d,tow=%.0f})\n",
+                "by ADKD %d (authbits=%lld, GST={wn=%d,tow=%.0f})\n",
                 success.prnd,
+                static_cast<int32_t>(success.adkd),
                 static_cast<long long>(state.auth_bits),
                 success.nav_time.wn,
                 success.nav_time.tow);
@@ -527,17 +591,31 @@ void OsnmaEngine::RegisterMacSuccesses(const OsnmaMacVerifier::Result& mac_resul
         else if (success.adkd == OsnmaAdkd::InavTiming)
         {
             ++statistics_.authenticated_timing_objects;
+
+            GalileoAuthenticatedTiming nav_data{};
+
+            if (GalileoInavDecoder::DecodeTiming(
+                *success.nav_candidate,
+                success.nav_time,
+                authentication_time,
+                state.auth_bits,
+                success.nav_fingerprint,
+                source,
+                raw_source,
+                nav_data))
+            {
+                authenticated_nav_data_.PushTiming(nav_data);
+
+                ++statistics_.authenticated_timing_output;
+
+                if (nav_data.utc_valid)
+                    ++statistics_.authenticated_utc_output;
+
+                if (nav_data.ggto_valid)
+                    ++statistics_.authenticated_ggto_output;
+            }
+
             printf("OSNMA auth: new timing parameters for E%02d authenticated "
-                "(authbits=%lld, GST={wn=%d,tow=%.0f})\n",
-                success.prnd,
-                static_cast<long long>(state.auth_bits),
-                success.nav_time.wn,
-                success.nav_time.tow);
-        }
-        else if (success.adkd == OsnmaAdkd::SlowMac)
-        {
-            ++statistics_.authenticated_slow_mac_objects;
-            printf("OSNMA auth: new slow MAC object for E%02d authenticated "
                 "(authbits=%lld, GST={wn=%d,tow=%.0f})\n",
                 success.prnd,
                 static_cast<long long>(state.auth_bits),
@@ -640,7 +718,10 @@ OsnmaEngine::ProcessMacksForDisclosedKey(const OsnmaDsmKroot& trusted_kroot,
         {
             ++statistics_.pending_macks_verified_ok;
             ++statistics_.auth_success;
-            RegisterMacSuccesses(mac_result);
+            RegisterMacSuccesses(mac_result,
+                disclosed_key_time,
+                pending.source,
+                pending.raw_source);
             RemovePendingMack(i);
 
             result.state = AuthState::Yes;
@@ -787,7 +868,10 @@ OsnmaEngine::VerifyPendingMacks(const OsnmaDsmKroot& trusted_kroot,
         if (mac_result.state == AuthState::Yes)
         {
             ++statistics_.pending_macks_verified_ok;
-            RegisterMacSuccesses(mac_result);
+            RegisterMacSuccesses(mac_result,
+                now,
+                pending.source,
+                pending.raw_source);
             RemovePendingMack(i);
 
             result.state = AuthState::Yes;

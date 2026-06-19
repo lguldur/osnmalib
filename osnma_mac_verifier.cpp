@@ -214,7 +214,8 @@ void OsnmaMacVerifier::AddSuccess(Result& result,
     int32_t tag_index,
     int32_t tag_bits,
     const GnssTime& nav_time,
-    std::uint64_t nav_fingerprint)
+    std::uint64_t nav_fingerprint,
+    const GalileoNavCandidate& nav_candidate)
 {
     if (result.success_count < 0 ||
         result.success_count >= Result::MAX_SUCCESS_RECORDS)
@@ -232,6 +233,7 @@ void OsnmaMacVerifier::AddSuccess(Result& result,
     record.tag_bits = tag_bits;
     record.nav_time = nav_time;
     record.nav_fingerprint = nav_fingerprint;
+    record.nav_candidate = &nav_candidate;
 
     ++result.success_count;
 }
@@ -412,7 +414,8 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
                             0,
                             mack.tag_size_bits,
                             tag0_nav_time,
-                            NavFingerprintFromMacInput(mac_input, true));
+                            NavFingerprintFromMacInput(mac_input, true),
+                            *tag0_candidate);
                     }
 
 
@@ -555,7 +558,8 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
                 tag.index,
                 tag.tag_size_bits,
                 tag_nav_time,
-                NavFingerprintFromMacInput(mac_input, false));
+                NavFingerprintFromMacInput(mac_input, false),
+                *candidate);
             continue;
         }
 

@@ -138,6 +138,28 @@ const OsnmaEngine::Statistics& OsnmaAuthenticator::GetEngineStatistics() const
     return engine_.GetStatistics();
 }
 
+bool OsnmaAuthenticator::PopAuthenticatedCedStatus(
+    GalileoAuthenticatedCedStatus& data)
+{
+    return engine_.PopAuthenticatedCedStatus(data);
+}
+
+bool OsnmaAuthenticator::PopAuthenticatedTiming(
+    GalileoAuthenticatedTiming& data)
+{
+    return engine_.PopAuthenticatedTiming(data);
+}
+
+int32_t OsnmaAuthenticator::AuthenticatedCedStatusCount() const
+{
+    return engine_.AuthenticatedCedStatusCount();
+}
+
+int32_t OsnmaAuthenticator::AuthenticatedTimingCount() const
+{
+    return engine_.AuthenticatedTimingCount();
+}
+
 bool OsnmaAuthenticator::SetMerkleRoot(const std::uint8_t* root_32_bytes)
 {
     return engine_.SetMerkleRoot(root_32_bytes);

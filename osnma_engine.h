@@ -6,6 +6,7 @@
 #include <tuple>
 
 #include "auth_record.h"
+#include "galileo_auth_data_fifo.h"
 #include "galileo_inav_page_parts.h"
 #include "galileo_nav_candidate.h"
 #include "nav_signal_source.h"
@@ -99,6 +100,13 @@ public:
         std::int64_t authenticated_timing_objects = 0;
         std::int64_t authenticated_slow_mac_objects = 0;
 
+        std::int64_t authenticated_ced_status_output = 0;
+        std::int64_t authenticated_timing_output = 0;
+        std::int64_t authenticated_ephemeris_output = 0;
+        std::int64_t authenticated_ionosphere_output = 0;
+        std::int64_t authenticated_utc_output = 0;
+        std::int64_t authenticated_ggto_output = 0;
+
         int32_t pending_macks_current = 0;
         int32_t pending_macks_max_seen = 0;
     };
@@ -121,6 +129,12 @@ public:
         int32_t raw_source);
 
     const Statistics& GetStatistics() const;
+
+    bool PopAuthenticatedCedStatus(GalileoAuthenticatedCedStatus& data);
+    bool PopAuthenticatedTiming(GalileoAuthenticatedTiming& data);
+
+    int32_t AuthenticatedCedStatusCount() const;
+    int32_t AuthenticatedTimingCount() const;
 
 private:
     static constexpr int32_t MAX_PENDING_MACKS = 64;
@@ -162,7 +176,10 @@ private:
 
     void UpdatePendingMackStatistics();
 
-    void RegisterMacSuccesses(const OsnmaMacVerifier::Result& mac_result);
+    void RegisterMacSuccesses(const OsnmaMacVerifier::Result& mac_result,
+        const GnssTime& authentication_time,
+        NavSignalSource source,
+        int32_t raw_source);
 
     static bool IsSameSubframeTime(const GnssTime& a,
         const GnssTime& b);
@@ -187,6 +204,7 @@ private:
 
     std::array<PendingMack, MAX_PENDING_MACKS> pending_macks_{};
     std::map<AuthenticatedObjectKey, AuthenticatedObjectState> authenticated_objects_{};
+    GalileoAuthDataFifo authenticated_nav_data_{};
 
     Statistics statistics_{};
 };

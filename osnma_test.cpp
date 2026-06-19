@@ -256,6 +256,13 @@ static void PrintOsnmaEngineStatistics(const OsnmaEngine::Statistics& s)
            static_cast<long long>(s.authenticated_ced_status_objects),
            static_cast<long long>(s.authenticated_timing_objects),
            static_cast<long long>(s.authenticated_slow_mac_objects));
+    printf("  authenticated_output ced_status=%lld timing=%lld eph=%lld iono=%lld utc=%lld ggto=%lld\n",
+           static_cast<long long>(s.authenticated_ced_status_output),
+           static_cast<long long>(s.authenticated_timing_output),
+           static_cast<long long>(s.authenticated_ephemeris_output),
+           static_cast<long long>(s.authenticated_ionosphere_output),
+           static_cast<long long>(s.authenticated_utc_output),
+           static_cast<long long>(s.authenticated_ggto_output));
 }
 
 static bool RunSelfTests()

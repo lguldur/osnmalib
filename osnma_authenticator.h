@@ -36,6 +36,12 @@ public:
 
     const OsnmaEngine::Statistics& GetEngineStatistics() const;
 
+    bool PopAuthenticatedCedStatus(GalileoAuthenticatedCedStatus& data);
+    bool PopAuthenticatedTiming(GalileoAuthenticatedTiming& data);
+
+    int32_t AuthenticatedCedStatusCount() const;
+    int32_t AuthenticatedTimingCount() const;
+
     bool SetMerkleRoot(const std::uint8_t* root_32_bytes);
 
     bool AddTrustedPublicKey(const OsnmaDsmPkr& public_key);

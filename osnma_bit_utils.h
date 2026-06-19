@@ -10,6 +10,55 @@ inline bool GetBitMsb0(const std::uint8_t* data, int32_t bit_index)
     return ((byte_value >> (7 - bit_in_byte)) & 0x01u) != 0;
 }
 
+
+inline std::uint64_t GetUnsignedBits64Msb0(const std::uint8_t* data,
+    int32_t first_bit,
+    int32_t bit_count)
+{
+    if (data == nullptr)
+        return 0;
+
+    if (bit_count <= 0 || bit_count > 64)
+        return 0;
+
+    std::uint64_t value = 0;
+
+    for (int32_t i = 0; i < bit_count; ++i)
+    {
+        value <<= 1;
+
+        if (GetBitMsb0(data, first_bit + i))
+            value |= 1u;
+    }
+
+    return value;
+}
+
+inline std::int64_t GetSignedBits64Msb0(const std::uint8_t* data,
+    int32_t first_bit,
+    int32_t bit_count)
+{
+    const std::uint64_t raw =
+        GetUnsignedBits64Msb0(data, first_bit, bit_count);
+
+    if (bit_count <= 0 || bit_count > 64)
+        return 0;
+
+    if (bit_count == 64)
+        return static_cast<std::int64_t>(raw);
+
+    const std::uint64_t sign_bit =
+        std::uint64_t{1} << (bit_count - 1);
+
+    if ((raw & sign_bit) == 0)
+        return static_cast<std::int64_t>(raw);
+
+    const std::uint64_t extension_mask =
+        ~((std::uint64_t{1} << bit_count) - 1u);
+
+    return static_cast<std::int64_t>(raw | extension_mask);
+}
+
 inline int32_t GetUnsignedBitsMsb0(const std::uint8_t* data,
     int32_t first_bit,
     int32_t bit_count)

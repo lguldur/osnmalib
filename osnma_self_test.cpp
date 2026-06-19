@@ -1,8 +1,11 @@
 #include "osnma_self_test.h"
 
+#include <cmath>
 #include <cstring>
+#include <numbers>
 #include <vector>
 
+#include "galileo_auth_data_fifo.h"
 #include "galileo_nav_candidate.h"
 #include "osnma_crypto.h"
 #include "osnma_mac_input.h"
@@ -529,6 +532,219 @@ namespace
     }
 }
 
+
+bool OsnmaSelfTest::TestAuthenticatedCedDecode(Result& result)
+{
+    ++result.test_count;
+
+    GalileoNavCandidate candidate{};
+    candidate.prn = 7;
+    candidate.creation_time = MakeTestTime();
+    candidate.last_update_time = MakeTestTime();
+
+    for (int32_t wt = GAL_WT1; wt <= GAL_WT5; ++wt)
+    {
+        FillWord(candidate, wt, 0);
+        candidate.words[wt].even.fill(0);
+        SetBitsMsb0(candidate.words[wt].even.data(), 0, 6,
+            static_cast<std::uint32_t>(wt));
+        SetBitsMsb0(candidate.words[wt].even.data(), 6, 10, 42u);
+    }
+
+    // WT1
+    SetBitsMsb0(candidate.words[GAL_WT1].even.data(), 16, 14, 100u);
+    SetBitsMsb0(candidate.words[GAL_WT1].even.data(), 30, 32, 0x40000000u);
+    SetBitsMsb0(candidate.words[GAL_WT1].even.data(), 62, 32, 0x40000000u);
+    SetBitsMsb0(candidate.words[GAL_WT1].even.data(), 94, 32, 0x80000000u);
+
+    // WT2
+    SetBitsMsb0(candidate.words[GAL_WT2].even.data(), 16, 32, 0x20000000u);
+    SetBitsMsb0(candidate.words[GAL_WT2].even.data(), 48, 32, 0x10000000u);
+    SetBitsMsb0(candidate.words[GAL_WT2].even.data(), 80, 32, 0xE0000000u);
+    SetBitsMsb0(candidate.words[GAL_WT2].even.data(), 112, 14, 0x3FFFu);
+
+    // WT3
+    SetBitsMsb0(candidate.words[GAL_WT3].even.data(), 16, 24, 1u);
+    SetBitsMsb0(candidate.words[GAL_WT3].even.data(), 40, 16, 0xFFFFu);
+    SetBitsMsb0(candidate.words[GAL_WT3].even.data(), 56, 16, 2u);
+    SetBitsMsb0(candidate.words[GAL_WT3].even.data(), 72, 16, 0xFFFEu);
+    SetBitsMsb0(candidate.words[GAL_WT3].even.data(), 88, 16, 32u);
+    SetBitsMsb0(candidate.words[GAL_WT3].even.data(), 104, 16, 0xFFE0u);
+    SetBitsMsb0(candidate.words[GAL_WT3].even.data(), 120, 8, 33u);
+
+    // WT4
+    SetBitsMsb0(candidate.words[GAL_WT4].even.data(), 16, 6, 7u);
+    SetBitsMsb0(candidate.words[GAL_WT4].even.data(), 22, 16, 1u);
+    SetBitsMsb0(candidate.words[GAL_WT4].even.data(), 38, 16, 0xFFFFu);
+    SetBitsMsb0(candidate.words[GAL_WT4].even.data(), 54, 14, 101u);
+    SetBitsMsb0(candidate.words[GAL_WT4].even.data(), 68, 31, 1u);
+    SetBitsMsb0(candidate.words[GAL_WT4].even.data(), 99, 21, 0x1FFFFFu);
+    SetBitsMsb0(candidate.words[GAL_WT4].even.data(), 120, 6, 1u);
+
+    // WT5 (WT5 does not carry IODnav, overwrite the artificial field above)
+    candidate.words[GAL_WT5].even.fill(0);
+    SetBitsMsb0(candidate.words[GAL_WT5].even.data(), 0, 6, 5u);
+    SetBitsMsb0(candidate.words[GAL_WT5].even.data(), 6, 11, 4u);
+    SetBitsMsb0(candidate.words[GAL_WT5].even.data(), 17, 11, 0x7FEu);
+    SetBitsMsb0(candidate.words[GAL_WT5].even.data(), 28, 14, 3u);
+    SetBitsMsb0(candidate.words[GAL_WT5].even.data(), 42, 5, 0x15u);
+    SetBitsMsb0(candidate.words[GAL_WT5].even.data(), 47, 10, 1u);
+    SetBitsMsb0(candidate.words[GAL_WT5].even.data(), 57, 10, 0x3FFu);
+    SetBitsMsb0(candidate.words[GAL_WT5].even.data(), 67, 2, 2u);
+    SetBitsMsb0(candidate.words[GAL_WT5].even.data(), 69, 2, 1u);
+    SetBitsMsb0(candidate.words[GAL_WT5].even.data(), 71, 1, 1u);
+    SetBitsMsb0(candidate.words[GAL_WT5].even.data(), 72, 1, 0u);
+
+    candidate.complete = candidate.IsComplete();
+
+    GalileoAuthenticatedCedStatus decoded{};
+
+    const bool ok = GalileoInavDecoder::DecodeCedStatus(
+        candidate,
+        MakeTestTime(),
+        MakeTestTime(),
+        40,
+        123u,
+        NavSignalSource::Freq1,
+        99,
+        decoded);
+
+    if (!Check(result, ok, "authenticated CED decode failed"))
+        return false;
+
+    if (!Check(result, decoded.ephemeris_valid,
+        "authenticated ephemeris validity failed"))
+    {
+        return false;
+    }
+
+    if (!Check(result, decoded.iodnav == 42,
+        "authenticated IODnav decode failed"))
+    {
+        return false;
+    }
+
+    if (!Check(result, decoded.ephemeris.Toe == 6000,
+        "authenticated Toe decode failed"))
+    {
+        return false;
+    }
+
+    if (!Check(result,
+        std::fabs(decoded.ephemeris.M0 - 0.5 * std::numbers::pi_v<double>) < 1e-12,
+        "authenticated M0 decode failed"))
+    {
+        return false;
+    }
+
+    if (!Check(result,
+        std::fabs(decoded.ephemeris.Ecc - 0.125) < 1e-15,
+        "authenticated eccentricity decode failed"))
+    {
+        return false;
+    }
+
+    if (!Check(result,
+        std::fabs(decoded.ephemeris.sqrtA - 4096.0) < 1e-12,
+        "authenticated sqrtA decode failed"))
+    {
+        return false;
+    }
+
+    if (!Check(result, decoded.sisa == 33,
+        "authenticated SISA decode failed"))
+    {
+        return false;
+    }
+
+    if (!Check(result,
+        std::fabs(decoded.ionosphere.ai0 - 1.0) < 1e-15,
+        "authenticated ionosphere ai0 decode failed"))
+    {
+        return false;
+    }
+
+    return true;
+}
+
+bool OsnmaSelfTest::TestAuthenticatedTimingDecode(Result& result)
+{
+    ++result.test_count;
+
+    GalileoNavCandidate candidate{};
+    candidate.prn = 7;
+    candidate.creation_time = MakeTestTime();
+    candidate.last_update_time = MakeTestTime();
+
+    FillWord(candidate, GAL_WT6, 0);
+    FillWord(candidate, GAL_WT10, 0);
+    candidate.words[GAL_WT6].even.fill(0);
+    candidate.words[GAL_WT10].even.fill(0);
+
+    candidate.words[GAL_WT6].page_epoch = MakeTestTime();
+    candidate.words[GAL_WT10].page_epoch = MakeTestTime();
+
+    SetBitsMsb0(candidate.words[GAL_WT6].even.data(), 0, 6, 6u);
+    SetBitsMsb0(candidate.words[GAL_WT6].even.data(), 6, 32, 1u);
+    SetBitsMsb0(candidate.words[GAL_WT6].even.data(), 38, 24, 0xFFFFFEu);
+    SetBitsMsb0(candidate.words[GAL_WT6].even.data(), 62, 8, 18u);
+    SetBitsMsb0(candidate.words[GAL_WT6].even.data(), 70, 8, 12u);
+    SetBitsMsb0(candidate.words[GAL_WT6].even.data(), 78, 8,
+        static_cast<std::uint32_t>(MakeTestTime().wn & 0xFF));
+    SetBitsMsb0(candidate.words[GAL_WT6].even.data(), 86, 8,
+        static_cast<std::uint32_t>((MakeTestTime().wn + 1) & 0xFF));
+    SetBitsMsb0(candidate.words[GAL_WT6].even.data(), 94, 3, 3u);
+    SetBitsMsb0(candidate.words[GAL_WT6].even.data(), 97, 8, 19u);
+
+    SetBitsMsb0(candidate.words[GAL_WT10].even.data(), 0, 6, 10u);
+    SetBitsMsb0(candidate.words[GAL_WT10].even.data(), 86, 16, 1u);
+    SetBitsMsb0(candidate.words[GAL_WT10].even.data(), 102, 12, 0xFFEu);
+    SetBitsMsb0(candidate.words[GAL_WT10].even.data(), 114, 8, 4u);
+    SetBitsMsb0(candidate.words[GAL_WT10].even.data(), 122, 6,
+        static_cast<std::uint32_t>(MakeTestTime().wn & 0x3F));
+
+    GalileoAuthenticatedTiming decoded{};
+
+    const bool ok = GalileoInavDecoder::DecodeTiming(
+        candidate,
+        MakeTestTime(),
+        MakeTestTime(),
+        40,
+        456u,
+        NavSignalSource::Freq1,
+        99,
+        decoded);
+
+    if (!Check(result, ok, "authenticated timing decode failed"))
+        return false;
+
+    if (!Check(result, decoded.utc_valid && decoded.ggto_valid,
+        "authenticated timing validity failed"))
+    {
+        return false;
+    }
+
+    if (!Check(result, decoded.utc.DeltaT_LS == 18,
+        "authenticated UTC leap seconds decode failed"))
+    {
+        return false;
+    }
+
+    if (!Check(result, decoded.utc.T0_UTC == 43200,
+        "authenticated UTC t0 decode failed"))
+    {
+        return false;
+    }
+
+    if (!Check(result, decoded.t0g == 14400,
+        "authenticated GGTO t0 decode failed"))
+    {
+        return false;
+    }
+
+    return true;
+}
+
 OsnmaSelfTest::Result OsnmaSelfTest::RunAll()
 {
     Result result{};
@@ -543,6 +759,8 @@ OsnmaSelfTest::Result OsnmaSelfTest::RunAll()
     TestMacseqValidThenMissingNavData(result);
     TestMacseqRejectsWrongMacseq(result);
     TestMacseqWaitsForFutureKey(result);
+    TestAuthenticatedCedDecode(result);
+    TestAuthenticatedTimingDecode(result);
 
     return result;
 }
