@@ -173,6 +173,10 @@ static void PrintOsnmaEngineStatistics(const OsnmaEngine::Statistics& s)
            static_cast<long long>(s.dsm_decode_ok));
     printf("  dsm_decode_failed=%lld\n",
            static_cast<long long>(s.dsm_decode_failed));
+    printf("  dsm_failures_nonfatal=%lld mack_parse_attempted_after_dsm_failure=%lld mack_parse_ok_after_dsm_failure=%lld\n",
+           static_cast<long long>(s.dsm_failures_nonfatal),
+           static_cast<long long>(s.mack_parse_attempted_after_dsm_failure),
+           static_cast<long long>(s.mack_parse_ok_after_dsm_failure));
 
     printf("  dsm_id_count:");
     for (int32_t i = 0; i < static_cast<int32_t>(s.dsm_id_count.size()); ++i)

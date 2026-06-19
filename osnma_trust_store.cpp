@@ -74,24 +74,30 @@ bool OsnmaTrustStore::AddTrustedPublicKey(const OsnmaDsmPkr& public_key,
 bool OsnmaTrustStore::AddPkr(const OsnmaDsmPkr& pkr,
                              const GnssTime& time)
 {
+    AuthReason reason = AuthReason::None;
+
+    if (!merkle_.VerifyPkr(pkr, reason))
+    {
+        /*
+            Invalid PKR copies are observations, not trusted state.  Do not
+            let them consume a slot or overwrite a previously verified key.
+        */
+        return false;
+    }
+
     const int32_t idx = FindFreePkrSlot();
 
-    AuthReason reason = AuthReason::None;
-    const bool verified = merkle_.VerifyPkr(pkr, reason);
-
     pkr_list_[idx].valid = true;
-    pkr_list_[idx].merkle_verified = verified;
+    pkr_list_[idx].merkle_verified = true;
     pkr_list_[idx].time = time;
     pkr_list_[idx].pkr = pkr;
 
-    return verified;
+    return true;
 }
 
 bool OsnmaTrustStore::AddKroot(const OsnmaDsmKroot& kroot,
     const GnssTime& time)
 {
-    const int32_t idx = FindFreeKrootSlot();
-
     bool verified = false;
 
     const int32_t public_key_idx = FindVerifiedPkrById(kroot.public_key_id);
@@ -128,12 +134,23 @@ bool OsnmaTrustStore::AddKroot(const OsnmaDsmKroot& kroot,
 #endif
     }
 
+    if (!verified)
+    {
+        /*
+            Keep the last verified KROOT active.  A damaged repeated KROOT
+            must not consume a slot or replace trusted chain material.
+        */
+        return false;
+    }
+
+    const int32_t idx = FindFreeKrootSlot();
+
     kroot_list_[idx].valid = true;
-    kroot_list_[idx].signature_verified = verified;
+    kroot_list_[idx].signature_verified = true;
     kroot_list_[idx].time = time;
     kroot_list_[idx].kroot = kroot;
 
-    return verified;
+    return true;
 }
 
 int32_t OsnmaTrustStore::FindLatestVerifiedPkr() const

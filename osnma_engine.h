@@ -42,6 +42,14 @@ public:
         std::int64_t dsm_messages_completed = 0;
         std::int64_t dsm_decode_ok = 0;
         std::int64_t dsm_decode_failed = 0;
+
+        /*
+            A DSM failure is non-fatal to the MACK carried by the same
+            subframe when an older trusted KROOT is already available.
+        */
+        std::int64_t dsm_failures_nonfatal = 0;
+        std::int64_t mack_parse_attempted_after_dsm_failure = 0;
+        std::int64_t mack_parse_ok_after_dsm_failure = 0;
         std::array<std::int64_t, 16> dsm_id_count{};
         std::array<std::int64_t, 16> dsm_completed_id_count{};
         std::array<std::int64_t, 32> dsm_decode_failed_reason_count{};

@@ -69,6 +69,41 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
     nav_candidate_store_.Cleanup(subframe.subframe_epoch);
     CleanupPendingMacks(subframe.subframe_epoch);
 
+    /*
+        DSM and MACK processing are deliberately independent.
+
+        A completed DSM-PKR/DSM-KROOT can be damaged while the MACK carried
+        by the same satellite and subframe is still perfectly usable.  A DSM
+        failure is therefore recorded, but it no longer aborts processing of
+        the MACK when a previously trusted KROOT is available.
+    */
+    AuthReason nonfatal_dsm_reason = AuthReason::None;
+    bool had_nonfatal_dsm_failure = false;
+
+    const auto register_nonfatal_dsm_failure =
+        [this, &nonfatal_dsm_reason, &had_nonfatal_dsm_failure](AuthReason reason)
+        {
+            if (!had_nonfatal_dsm_failure)
+            {
+                had_nonfatal_dsm_failure = true;
+                nonfatal_dsm_reason = reason;
+                ++statistics_.dsm_failures_nonfatal;
+            }
+        };
+
+    const auto result_reason =
+        [&nonfatal_dsm_reason](AuthReason normal_reason)
+        {
+            if (nonfatal_dsm_reason != AuthReason::None &&
+                (normal_reason == AuthReason::WaitingForKey ||
+                 normal_reason == AuthReason::WaitingForMoreFrames))
+            {
+                return nonfatal_dsm_reason;
+            }
+
+            return normal_reason;
+        };
+
     OsnmaDsmBlock block{};
 
     block.prn = subframe.prn;
@@ -121,22 +156,6 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
         OsnmaDecodedDsm decoded{};
         AuthReason decode_reason = AuthReason::None;
 
-        /*printf("Completed DSM: PRN=%d DSM_ID=%d type=%d blocks=%d bytes=%d first=%02X %02X %02X %02X %02X %02X %02X %02X\n",
-            message.prn,
-            message.dsm_id,
-            static_cast<int32_t>(message.type),
-            message.block_count,
-            message.byte_count,
-            message.data[0],
-            message.data[1],
-            message.data[2],
-            message.data[3],
-            message.data[4],
-            message.data[5],
-            message.data[6],
-            message.data[7]);
-        */
-
         const bool decoded_ok =
             dsm_content_decoder_.Decode(message,
                 decoded,
@@ -155,111 +174,106 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
                 ++statistics_.dsm_decode_failed_reason_count[reason_index];
             }
 
-            return MakePendingResult(subframe,
-                source,
-                raw_source,
-                decode_reason);
+            register_nonfatal_dsm_failure(decode_reason);
         }
-
-        ++statistics_.dsm_decode_ok;
-
-        if (decoded.type == OsnmaDsmType::Pkr &&
-            decoded.pkr.valid_layout)
+        else
         {
-            ++statistics_.pkr_received;
+            ++statistics_.dsm_decode_ok;
 
-            const bool verified =
-                trust_store_.AddPkr(decoded.pkr,
-                    subframe.subframe_epoch);
-
-            if (!verified)
+            if (decoded.type == OsnmaDsmType::Pkr &&
+                decoded.pkr.valid_layout)
             {
-                ++statistics_.pkr_failed;
+                ++statistics_.pkr_received;
 
-                const AuthReason pkr_reason =
-                    AuthReason::MerkleVerificationFailed;
+                const bool verified =
+                    trust_store_.AddPkr(decoded.pkr,
+                        subframe.subframe_epoch);
 
-                const int32_t reason_index =
-                    static_cast<int32_t>(pkr_reason);
-
-                if (reason_index >= 0 &&
-                    reason_index < static_cast<int32_t>(statistics_.pkr_failed_reason_count.size()))
+                if (!verified)
                 {
-                    ++statistics_.pkr_failed_reason_count[reason_index];
-                }
+                    ++statistics_.pkr_failed;
 
-                return MakePendingResult(subframe,
-                    source,
-                    raw_source,
-                    pkr_reason);
+                    const AuthReason pkr_reason =
+                        AuthReason::MerkleVerificationFailed;
+
+                    const int32_t reason_index =
+                        static_cast<int32_t>(pkr_reason);
+
+                    if (reason_index >= 0 &&
+                        reason_index < static_cast<int32_t>(statistics_.pkr_failed_reason_count.size()))
+                    {
+                        ++statistics_.pkr_failed_reason_count[reason_index];
+                    }
+
+                    register_nonfatal_dsm_failure(pkr_reason);
+                }
+                else
+                {
+                    ++statistics_.pkr_verified;
+                }
             }
 
-            ++statistics_.pkr_verified;
-        }
-
-        if (decoded.type == OsnmaDsmType::Kroot &&
-            decoded.kroot.valid_layout)
-        {
-            ++statistics_.kroot_received;
+            if (decoded.type == OsnmaDsmType::Kroot &&
+                decoded.kroot.valid_layout)
+            {
+                ++statistics_.kroot_received;
 
 #if OSNMA_VERBOSE_CRYPTO
-            printf("KROOT decoded: DSM_ID=%d PKID=%d CID=%d HF=%d MF=%d KS=%d TS=%d MACLT=%d WN=%d TOWH=%d\n",
-                message.dsm_id,
-                decoded.kroot.public_key_id,
-                decoded.kroot.kroot_chain_id,
-                static_cast<int32_t>(decoded.kroot.hash_function),
-                static_cast<int32_t>(decoded.kroot.mac_function),
-                decoded.kroot.key_size_bits,
-                decoded.kroot.tag_size_bits,
-                decoded.kroot.mac_lookup_table,
-                decoded.kroot.kroot_wn,
-                decoded.kroot.kroot_towh);
+                printf("KROOT decoded: DSM_ID=%d PKID=%d CID=%d HF=%d MF=%d KS=%d TS=%d MACLT=%d WN=%d TOWH=%d\n",
+                    message.dsm_id,
+                    decoded.kroot.public_key_id,
+                    decoded.kroot.kroot_chain_id,
+                    static_cast<int32_t>(decoded.kroot.hash_function),
+                    static_cast<int32_t>(decoded.kroot.mac_function),
+                    decoded.kroot.key_size_bits,
+                    decoded.kroot.tag_size_bits,
+                    decoded.kroot.mac_lookup_table,
+                    decoded.kroot.kroot_wn,
+                    decoded.kroot.kroot_towh);
 #endif
 
-            const bool verified =
-                trust_store_.AddKroot(decoded.kroot,
-                    subframe.subframe_epoch);
+                const bool verified =
+                    trust_store_.AddKroot(decoded.kroot,
+                        subframe.subframe_epoch);
 
-            if (!verified)
-            {
-                ++statistics_.kroot_failed;
-
-                const AuthReason kroot_reason =
-                    AuthReason::SignatureVerificationFailed;
-
-                const int32_t reason_index =
-                    static_cast<int32_t>(kroot_reason);
-
-                if (reason_index >= 0 &&
-                    reason_index < static_cast<int32_t>(statistics_.kroot_failed_reason_count.size()))
+                if (!verified)
                 {
-                    ++statistics_.kroot_failed_reason_count[reason_index];
+                    ++statistics_.kroot_failed;
+
+                    const AuthReason kroot_reason =
+                        AuthReason::SignatureVerificationFailed;
+
+                    const int32_t reason_index =
+                        static_cast<int32_t>(kroot_reason);
+
+                    if (reason_index >= 0 &&
+                        reason_index < static_cast<int32_t>(statistics_.kroot_failed_reason_count.size()))
+                    {
+                        ++statistics_.kroot_failed_reason_count[reason_index];
+                    }
+
+                    register_nonfatal_dsm_failure(kroot_reason);
                 }
-
-                return MakePendingResult(subframe,
-                    source,
-                    raw_source,
-                    kroot_reason);
-            }
-
-            ++statistics_.kroot_verified;
-
-            if (!tesla_chain_.IsInitialized())
-            {
-                AuthReason tesla_reason = AuthReason::None;
-
-                if (!tesla_chain_.InitializeFromKroot(decoded.kroot,
-                    tesla_reason))
+                else
                 {
-                    ++statistics_.tesla_init_failed;
+                    ++statistics_.kroot_verified;
 
-                    return MakePendingResult(subframe,
-                        source,
-                        raw_source,
-                        tesla_reason);
+                    if (!tesla_chain_.IsInitialized())
+                    {
+                        AuthReason tesla_reason = AuthReason::None;
+
+                        if (!tesla_chain_.InitializeFromKroot(decoded.kroot,
+                            tesla_reason))
+                        {
+                            ++statistics_.tesla_init_failed;
+                            register_nonfatal_dsm_failure(tesla_reason);
+                        }
+                        else
+                        {
+                            ++statistics_.tesla_initialized;
+                        }
+                    }
                 }
-
-                ++statistics_.tesla_initialized;
             }
         }
     }
@@ -274,8 +288,11 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
         return MakePendingResult(subframe,
             source,
             raw_source,
-            AuthReason::WaitingForKey);
+            result_reason(AuthReason::WaitingForKey));
     }
+
+    if (had_nonfatal_dsm_failure)
+        ++statistics_.mack_parse_attempted_after_dsm_failure;
 
     OsnmaMackMessage mack{};
     AuthReason mack_reason = AuthReason::None;
@@ -298,6 +315,9 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
     }
 
     ++statistics_.mack_parse_ok;
+
+    if (had_nonfatal_dsm_failure)
+        ++statistics_.mack_parse_ok_after_dsm_failure;
 
     /*
         Store this MACK for future verification.
@@ -329,7 +349,7 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
         return MakePendingResult(subframe,
             source,
             raw_source,
-            mack_result.reason);
+            result_reason(mack_result.reason));
     }
 
     if (key_result.status ==
@@ -340,7 +360,7 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
         return MakePendingResult(subframe,
             source,
             raw_source,
-            AuthReason::WaitingForKey);
+            result_reason(AuthReason::WaitingForKey));
     }
 
     if (key_result.status == OsnmaTeslaChain::DisclosedKeyStatus::WaitingForKey)
@@ -348,7 +368,7 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
         return MakePendingResult(subframe,
             source,
             raw_source,
-            key_result.reason);
+            result_reason(key_result.reason));
     }
 
     ++statistics_.disclosed_keys_failed;
