@@ -3,9 +3,11 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "osnma_authenticator.h"
 #include "osnma_raw_json_reader.h"
@@ -18,6 +20,7 @@
 // -json D:\data\osnma\week_1397_1h.jsonl D:\data\osnma\OSNMA_MerkleTree_20251210100000_newPKID_2.xml D:\data\osnma\OSNMA_PublicKey_20251210100000_newPKID_2.xml > d:\data\osnma\jsonout.txt
 // -json D:\data\osnma\week_1397_24h.jsonl D:\data\osnma\OSNMA_MerkleTree_20251210100000_newPKID_2.xml D:\data\osnma\OSNMA_PublicKey_20251210100000_newPKID_2.xml > d:\data\osnma\jsonout.txt
 // -json D:\data\osnma\week_1397_24h.jsonl D:\data\osnma\OSNMA_MerkleTree_20251210100000_newPKID_2.xml D:\data\osnma\OSNMA_PublicKey_20251210100000_newPKID_2.xml --print-nav > d:\data\osnma\jsonout_nav.txt
+// -json D:\data\osnma\week_1397_24h.jsonl D:\data\osnma\OSNMA_MerkleTree_20251210100000_newPKID_2.xml D:\data\osnma\OSNMA_PublicKey_20251210100000_newPKID_2.xml --rinex-prefix D:\data\osnma\week_1397
 
 namespace
 {
@@ -33,6 +36,12 @@ namespace
         int32_t hour = 0;
         int32_t minute = 0;
         int32_t second = 0;
+    };
+
+    struct AuthenticatedNavigationRecords
+    {
+        std::vector<GalileoAuthenticatedCedStatus> ced_status;
+        std::vector<GalileoAuthenticatedTiming> timing;
     };
 
     int32_t GstWeekToRinexWeek(int32_t gst_week)
@@ -107,17 +116,21 @@ namespace
         return std::string(buffer);
     }
 
-    void PrintRinexFour(double a,
+    void WriteRinexFour(std::FILE* out,
+        double a,
         double b,
         double c,
         double d)
     {
+        if (out == nullptr)
+            return;
+
         const std::string fa = RinexDouble(a);
         const std::string fb = RinexDouble(b);
         const std::string fc = RinexDouble(c);
         const std::string fd = RinexDouble(d);
 
-        printf("    %s%s%s%s\n",
+        std::fprintf(out, "    %s%s%s%s\n",
             fa.c_str(),
             fb.c_str(),
             fc.c_str(),
@@ -159,38 +172,56 @@ namespace
             SECONDS_PER_WEEK;
     }
 
-    void PrintHeaderStyleLine(const std::string& content,
+    void WriteHeaderStyleLine(std::FILE* out,
+        const std::string& content,
         const char* label)
     {
-        printf("%-60.60s%-20.20s\n",
+        if (out == nullptr)
+            return;
+
+        std::fprintf(out, "%-60.60s%-20.20s\n",
             content.c_str(),
             label != nullptr ? label : "");
     }
 
-    void PrintAuthenticatedCedAsRinex(
-        const GalileoAuthenticatedCedStatus& data)
+    bool WriteAuthenticatedCedAsRinex(
+        std::FILE* out,
+        const GalileoAuthenticatedCedStatus& data,
+        bool include_diagnostics,
+        bool include_ionosphere_record)
     {
+        if (out == nullptr)
+            return false;
+
         const GALEphDecodedType& eph = data.ephemeris;
 
-        printf("# OSNMA E%02d NAV_GST=%d/%.0f AUTH_GST=%d/%.0f "
-               "ADKD=%d AUTHBITS=%lld IODNAV=%d SISA_INDEX=%u\n",
-            data.prn,
-            data.navigation_time.wn,
-            data.navigation_time.tow,
-            data.authentication_time.wn,
-            data.authentication_time.tow,
-            static_cast<int32_t>(data.authentication_adkd),
-            static_cast<long long>(data.auth_bits),
-            data.iodnav,
-            static_cast<unsigned>(data.sisa));
+        if (include_diagnostics)
+        {
+            std::fprintf(out,
+                "# OSNMA E%02d NAV_GST=%d/%.0f AUTH_GST=%d/%.0f "
+                "ADKD=%d AUTHBITS=%lld IODNAV=%d SISA_INDEX=%u\n",
+                data.prn,
+                data.navigation_time.wn,
+                data.navigation_time.tow,
+                data.authentication_time.wn,
+                data.authentication_time.tow,
+                static_cast<int32_t>(data.authentication_adkd),
+                static_cast<long long>(data.auth_bits),
+                data.iodnav,
+                static_cast<unsigned>(data.sisa));
+        }
 
         if (!data.ephemeris_valid)
         {
-            printf("# RINEX record skipped: ephemeris_valid=0 "
-                   "iodnav_consistent=%d svid_matches_prn=%d\n",
-                data.iodnav_consistent ? 1 : 0,
-                data.svid_matches_prn ? 1 : 0);
-            return;
+            if (include_diagnostics)
+            {
+                std::fprintf(out,
+                    "# RINEX record skipped: ephemeris_valid=0 "
+                    "iodnav_consistent=%d svid_matches_prn=%d\n",
+                    data.iodnav_consistent ? 1 : 0,
+                    data.svid_matches_prn ? 1 : 0);
+            }
+            return false;
         }
 
         CalendarFields epoch{};
@@ -200,15 +231,17 @@ namespace
             static_cast<double>(eph.Toc),
             epoch))
         {
-            printf("# RINEX record skipped: invalid Toc epoch\n");
-            return;
+            if (include_diagnostics)
+                std::fprintf(out, "# RINEX record skipped: invalid Toc epoch\n");
+            return false;
         }
 
         const std::string af0 = RinexDouble(eph.af0);
         const std::string af1 = RinexDouble(eph.af1);
         const std::string af2 = RinexDouble(eph.af2);
 
-        printf("E%02d %04d %02d %02d %02d %02d %02d%s%s%s\n",
+        std::fprintf(out,
+            "E%02d %04d %02d %02d %02d %02d %02d%s%s%s\n",
             data.prn,
             epoch.year,
             epoch.month,
@@ -220,50 +253,50 @@ namespace
             af1.c_str(),
             af2.c_str());
 
-        PrintRinexFour(
+        WriteRinexFour(out,
             static_cast<double>(eph.IODNav),
             eph.Crs,
             eph.DeltaN,
             eph.M0);
 
-        PrintRinexFour(
+        WriteRinexFour(out,
             eph.Cuc,
             eph.Ecc,
             eph.Cus,
             eph.sqrtA);
 
-        PrintRinexFour(
+        WriteRinexFour(out,
             static_cast<double>(eph.Toe),
             eph.Cic,
             eph.Omega0,
             eph.Cis);
 
-        PrintRinexFour(
+        WriteRinexFour(out,
             eph.i0,
             eph.Crc,
             eph.Omega,
             eph.OmegaDot);
 
-        PrintRinexFour(
+        WriteRinexFour(out,
             eph.IDot,
             static_cast<double>(eph.DataSources),
             static_cast<double>(GstWeekToRinexWeek(
                 static_cast<int32_t>(eph.WNToe))),
             0.0);
 
-        PrintRinexFour(
+        WriteRinexFour(out,
             SisaIndexToMeters(data.sisa),
             static_cast<double>(eph.SVHealth),
             eph.BGD_L1E5a,
             eph.BGD_L1E5b);
 
-        PrintRinexFour(
+        WriteRinexFour(out,
             RinexTransmissionTime(data),
             0.0,
             0.0,
             0.0);
 
-        if (data.ionosphere_valid)
+        if (include_ionosphere_record && data.ionosphere_valid)
         {
             char content[128]{};
             const std::string ai0 = RinexDouble(data.ionosphere.ai0, 12, 4);
@@ -279,24 +312,40 @@ namespace
                 ai2.c_str(),
                 zero.c_str());
 
-            PrintHeaderStyleLine(content, "IONOSPHERIC CORR");
-            printf("# IONO E%02d storm_flags=0x%02X\n",
-                data.prn,
-                static_cast<unsigned>(data.ionosphere.StormFlags));
+            WriteHeaderStyleLine(out, content, "IONOSPHERIC CORR");
+
+            if (include_diagnostics)
+            {
+                std::fprintf(out,
+                    "# IONO E%02d storm_flags=0x%02X\n",
+                    data.prn,
+                    static_cast<unsigned>(data.ionosphere.StormFlags));
+            }
         }
+
+        return true;
     }
 
-    void PrintAuthenticatedTimingAsRinexHeader(
-        const GalileoAuthenticatedTiming& data)
+    void WriteAuthenticatedTimingAsRinexHeader(
+        std::FILE* out,
+        const GalileoAuthenticatedTiming& data,
+        bool include_diagnostics)
     {
-        printf("# OSNMA-TIME E%02d NAV_GST=%d/%.0f AUTH_GST=%d/%.0f "
-               "AUTHBITS=%lld\n",
-            data.prn,
-            data.navigation_time.wn,
-            data.navigation_time.tow,
-            data.authentication_time.wn,
-            data.authentication_time.tow,
-            static_cast<long long>(data.auth_bits));
+        if (out == nullptr)
+            return;
+
+        if (include_diagnostics)
+        {
+            std::fprintf(out,
+                "# OSNMA-TIME E%02d NAV_GST=%d/%.0f AUTH_GST=%d/%.0f "
+                "AUTHBITS=%lld\n",
+                data.prn,
+                data.navigation_time.wn,
+                data.navigation_time.tow,
+                data.authentication_time.wn,
+                data.authentication_time.tow,
+                static_cast<long long>(data.auth_bits));
+        }
 
         if (data.utc_valid)
         {
@@ -313,16 +362,20 @@ namespace
                 GstWeekToRinexWeek(data.utc.WN0_UTC),
                 data.prn);
 
-            PrintHeaderStyleLine(content, "TIME SYSTEM CORR");
+            WriteHeaderStyleLine(out, content, "TIME SYSTEM CORR");
 
-            printf("# LEAP E%02d current=%d future=%d WN_LSF_GST=%d "
-                   "WN_LSF_RINEX=%d DN=%d\n",
-                data.prn,
-                data.utc.DeltaT_LS,
-                data.utc.DeltaT_LSF,
-                data.utc.WN_LSF,
-                GstWeekToRinexWeek(data.utc.WN_LSF),
-                data.utc.DN_LSF);
+            if (include_diagnostics)
+            {
+                std::fprintf(out,
+                    "# LEAP E%02d current=%d future=%d WN_LSF_GST=%d "
+                    "WN_LSF_RINEX=%d DN=%d\n",
+                    data.prn,
+                    data.utc.DeltaT_LS,
+                    data.utc.DeltaT_LSF,
+                    data.utc.WN_LSF,
+                    GstWeekToRinexWeek(data.utc.WN_LSF),
+                    data.utc.DN_LSF);
+            }
         }
 
         if (data.ggto_valid)
@@ -340,52 +393,289 @@ namespace
                 GstWeekToRinexWeek(data.wn0g),
                 data.prn);
 
-            PrintHeaderStyleLine(content, "TIME SYSTEM CORR");
+            WriteHeaderStyleLine(out, content, "TIME SYSTEM CORR");
         }
     }
 
-    void PrintAuthenticatedNavigationDump(OsnmaAuthenticator& auth)
+    AuthenticatedNavigationRecords CollectAuthenticatedNavigation(
+        OsnmaAuthenticator& auth)
     {
-        const int32_t ced_queued = auth.AuthenticatedCedStatusCount();
-        const int32_t timing_queued = auth.AuthenticatedTimingCount();
+        AuthenticatedNavigationRecords records{};
 
-        printf("\n===== BEGIN AUTHENTICATED GALILEO RINEX 3.05 COMPARISON DUMP =====\n");
-        printf("# CED/status records queued: %d\n", ced_queued);
-        printf("# Timing records queued: %d\n", timing_queued);
-        printf("# Galileo week values in the RINEX records are GST week + 1024.\n");
-        printf("# Data source 513 means I/NAV E1-B plus E5b/E1 clock parameters.\n");
-        printf("# Lines beginning with # are diagnostics, not RINEX records.\n");
+        records.ced_status.reserve(
+            static_cast<std::size_t>(auth.AuthenticatedCedStatusCount()));
+        records.timing.reserve(
+            static_cast<std::size_t>(auth.AuthenticatedTimingCount()));
+
+        GalileoAuthenticatedCedStatus ced{};
+        while (auth.PopAuthenticatedCedStatus(ced))
+            records.ced_status.push_back(ced);
+
+        GalileoAuthenticatedTiming timing{};
+        while (auth.PopAuthenticatedTiming(timing))
+            records.timing.push_back(timing);
+
+        return records;
+    }
+
+    void PrintAuthenticatedNavigationDump(
+        const AuthenticatedNavigationRecords& records)
+    {
+        std::printf(
+            "\n===== BEGIN AUTHENTICATED GALILEO RINEX 3.05 COMPARISON DUMP =====\n");
+        std::printf("# CED/status records queued: %d\n",
+            static_cast<int32_t>(records.ced_status.size()));
+        std::printf("# Timing records queued: %d\n",
+            static_cast<int32_t>(records.timing.size()));
+        std::printf("# Galileo week values in the RINEX records are GST week + 1024.\n");
+        std::printf("# Data source 513 means I/NAV E1-B plus E5b/E1 clock parameters.\n");
+        std::printf("# Lines beginning with # are diagnostics, not RINEX records.\n");
 
         int32_t ced_printed = 0;
         int32_t ced_skipped = 0;
-        GalileoAuthenticatedCedStatus ced{};
 
-        while (auth.PopAuthenticatedCedStatus(ced))
+        for (const GalileoAuthenticatedCedStatus& ced : records.ced_status)
         {
-            if (ced.ephemeris_valid)
+            if (WriteAuthenticatedCedAsRinex(
+                stdout,
+                ced,
+                true,
+                true))
+            {
                 ++ced_printed;
+            }
             else
+            {
                 ++ced_skipped;
-
-            PrintAuthenticatedCedAsRinex(ced);
+            }
         }
 
-        printf("\n# AUTHENTICATED UTC/GGTO HEADER-STYLE RECORDS\n");
+        std::printf("\n# AUTHENTICATED UTC/GGTO HEADER-STYLE RECORDS\n");
 
-        int32_t timing_printed = 0;
-        GalileoAuthenticatedTiming timing{};
-
-        while (auth.PopAuthenticatedTiming(timing))
+        for (const GalileoAuthenticatedTiming& timing : records.timing)
         {
-            ++timing_printed;
-            PrintAuthenticatedTimingAsRinexHeader(timing);
+            WriteAuthenticatedTimingAsRinexHeader(
+                stdout,
+                timing,
+                true);
         }
 
-        printf("# Dump summary: ced_printed=%d ced_skipped=%d timing_printed=%d\n",
+        std::printf(
+            "# Dump summary: ced_printed=%d ced_skipped=%d timing_printed=%d\n",
             ced_printed,
             ced_skipped,
-            timing_printed);
-        printf("===== END AUTHENTICATED GALILEO RINEX 3.05 COMPARISON DUMP =====\n");
+            static_cast<int32_t>(records.timing.size()));
+        std::printf(
+            "===== END AUTHENTICATED GALILEO RINEX 3.05 COMPARISON DUMP =====\n");
+    }
+
+    std::string CurrentUtcRinexDate()
+    {
+        const std::time_t now = std::time(nullptr);
+        std::tm utc{};
+
+#if defined(_WIN32)
+        if (gmtime_s(&utc, &now) != 0)
+            return "00000000 000000 UTC";
+#else
+        if (gmtime_r(&now, &utc) == nullptr)
+            return "00000000 000000 UTC";
+#endif
+
+        char buffer[32]{};
+        std::snprintf(buffer,
+            sizeof(buffer),
+            "%04d%02d%02d %02d%02d%02d UTC",
+            utc.tm_year + 1900,
+            utc.tm_mon + 1,
+            utc.tm_mday,
+            utc.tm_hour,
+            utc.tm_min,
+            utc.tm_sec);
+        return std::string(buffer);
+    }
+
+    std::filesystem::path MakeRinexOutputFilename(
+        const char* prefix)
+    {
+        const std::filesystem::path prefix_path(
+            prefix != nullptr ? prefix : "");
+
+        const std::string filename =
+            prefix_path.filename().string() + "_osnma_nav.rnx";
+
+        return prefix_path.parent_path() / filename;
+    }
+
+    std::FILE* OpenTextFileForWriting(
+        const std::filesystem::path& filename)
+    {
+#if defined(_WIN32)
+        std::FILE* file = nullptr;
+        if (_wfopen_s(&file, filename.c_str(), L"w") != 0)
+            return nullptr;
+        return file;
+#else
+        return std::fopen(filename.string().c_str(), "w");
+#endif
+    }
+
+    void WriteRinexFileHeader(
+        std::FILE* out,
+        const AuthenticatedNavigationRecords& records)
+    {
+        WriteHeaderStyleLine(out,
+            "     3.05           N: GNSS NAV DATA    E: GALILEO",
+            "RINEX VERSION / TYPE");
+
+        char program_line[128]{};
+        const std::string utc_date = CurrentUtcRinexDate();
+        std::snprintf(program_line,
+            sizeof(program_line),
+            "%-20.20s%-20.20s%-20.20s",
+            "OSNMALIB",
+            "OSNMA",
+            utc_date.c_str());
+        WriteHeaderStyleLine(out, program_line, "PGM / RUN BY / DATE");
+
+        WriteHeaderStyleLine(out,
+            "GALILEO I/NAV EPHEMERIDES AUTHENTICATED BY OSNMA",
+            "COMMENT");
+        WriteHeaderStyleLine(out,
+            "ONLY VALID AUTHENTICATED EPHEMERIS RECORDS ARE WRITTEN",
+            "COMMENT");
+
+        for (const GalileoAuthenticatedCedStatus& ced : records.ced_status)
+        {
+            if (!ced.ionosphere_valid)
+                continue;
+
+            char content[128]{};
+            const std::string ai0 = RinexDouble(ced.ionosphere.ai0, 12, 4);
+            const std::string ai1 = RinexDouble(ced.ionosphere.ai1, 12, 4);
+            const std::string ai2 = RinexDouble(ced.ionosphere.ai2, 12, 4);
+            const std::string zero = RinexDouble(0.0, 12, 4);
+
+            std::snprintf(content,
+                sizeof(content),
+                "GAL %s%s%s%s",
+                ai0.c_str(),
+                ai1.c_str(),
+                ai2.c_str(),
+                zero.c_str());
+            WriteHeaderStyleLine(out, content, "IONOSPHERIC CORR");
+            break;
+        }
+
+        const GalileoAuthenticatedTiming* first_utc = nullptr;
+        const GalileoAuthenticatedTiming* first_ggto = nullptr;
+
+        for (const GalileoAuthenticatedTiming& timing : records.timing)
+        {
+            if (first_utc == nullptr && timing.utc_valid)
+                first_utc = &timing;
+            if (first_ggto == nullptr && timing.ggto_valid)
+                first_ggto = &timing;
+            if (first_utc != nullptr && first_ggto != nullptr)
+                break;
+        }
+
+        if (first_utc != nullptr)
+        {
+            const GalileoAuthenticatedTiming& timing = *first_utc;
+            char content[160]{};
+            const std::string a0 = RinexDouble(timing.utc.a0, 17, 10);
+            const std::string a1 = RinexDouble(timing.utc.a1, 16, 9);
+
+            std::snprintf(content,
+                sizeof(content),
+                "GAUT %s%s %6d %4d E%02d  0",
+                a0.c_str(),
+                a1.c_str(),
+                timing.utc.T0_UTC,
+                GstWeekToRinexWeek(timing.utc.WN0_UTC),
+                timing.prn);
+            WriteHeaderStyleLine(out, content, "TIME SYSTEM CORR");
+
+            std::snprintf(content,
+                sizeof(content),
+                "%6d%6d%6d%6d%3s",
+                timing.utc.DeltaT_LS,
+                timing.utc.DeltaT_LSF,
+                GstWeekToRinexWeek(timing.utc.WN_LSF),
+                timing.utc.DN_LSF,
+                "E");
+            WriteHeaderStyleLine(out, content, "LEAP SECONDS");
+        }
+
+        if (first_ggto != nullptr)
+        {
+            const GalileoAuthenticatedTiming& timing = *first_ggto;
+            char content[160]{};
+            const std::string a0 = RinexDouble(timing.a0g, 17, 10);
+            const std::string a1 = RinexDouble(timing.a1g, 16, 9);
+
+            std::snprintf(content,
+                sizeof(content),
+                "GAGP %s%s %6d %4d E%02d  0",
+                a0.c_str(),
+                a1.c_str(),
+                timing.t0g,
+                GstWeekToRinexWeek(timing.wn0g),
+                timing.prn);
+            WriteHeaderStyleLine(out, content, "TIME SYSTEM CORR");
+        }
+
+        WriteHeaderStyleLine(out, "", "END OF HEADER");
+    }
+
+    bool WriteAuthenticatedNavigationRinexFile(
+        const AuthenticatedNavigationRecords& records,
+        const char* prefix,
+        std::string& filename_written,
+        int32_t& record_count)
+    {
+        filename_written.clear();
+        record_count = 0;
+
+        if (prefix == nullptr || prefix[0] == '\0')
+            return false;
+
+        const std::filesystem::path filename =
+            MakeRinexOutputFilename(prefix);
+
+        std::error_code ec{};
+        const std::filesystem::path parent = filename.parent_path();
+        if (!parent.empty())
+            std::filesystem::create_directories(parent, ec);
+
+        if (ec)
+            return false;
+
+        std::FILE* out = OpenTextFileForWriting(filename);
+        if (out == nullptr)
+            return false;
+
+        WriteRinexFileHeader(out, records);
+
+        for (const GalileoAuthenticatedCedStatus& ced : records.ced_status)
+        {
+            if (WriteAuthenticatedCedAsRinex(
+                out,
+                ced,
+                false,
+                false))
+            {
+                ++record_count;
+            }
+        }
+
+        const bool close_ok = (std::fclose(out) == 0);
+        if (!close_ok)
+            return false;
+
+        filename_written = filename.string();
+        return true;
     }
 }
 
@@ -404,12 +694,16 @@ static void PrintUsage(const char* exe_name)
     printf("    %s -tv <Test_vectors_root> <scenario> <csv_file>\n", exe);
     printf("\n");
     printf("  JSONL/live-style input with explicit XML crypto material:\n");
-    printf("    %s -json <file.jsonl> <MerkleTree.xml> <PublicKey.xml> [--print-nav]\n", exe);
-    printf("      --print-nav appends authenticated navigation data in RINEX 3.05 field order.\n");
+    printf("    %s -json <file.jsonl> <MerkleTree.xml> <PublicKey.xml> [options]\n", exe);
+    printf("      --print-nav\n");
+    printf("          Appends the authenticated navigation comparison dump to stdout.\n");
+    printf("      --rinex-prefix <prefix>\n");
+    printf("          Writes a dedicated RINEX file named <prefix>_osnma_nav.rnx.\n");
     printf("\n");
     printf("Examples:\n");
     printf("  %s -tv \"D:\\data\\osnma\\Test_vectors\"\n", exe);
     printf("  %s -json week_1397_24h.jsonl OSNMA_MerkleTree_20251210100000_newPKID_2.xml OSNMA_PublicKey_20251210100000_newPKID_2.xml --print-nav\n", exe);
+    printf("  %s -json week_1397_24h.jsonl OSNMA_MerkleTree_20251210100000_newPKID_2.xml OSNMA_PublicKey_20251210100000_newPKID_2.xml --rinex-prefix D:\\data\\osnma\\week_1397\n", exe);
 }
 
 static void PrintXmlMaterialStats(const OsnmaXmlMaterialLoader::Stats& s)
@@ -740,7 +1034,8 @@ static int RunOfficialTestVectorMode(const char* test_vectors_root_arg,
 static int RunJsonMode(const char* jsonl_filename,
     const char* merkle_tree_xml,
     const char* public_key_xml,
-    bool print_navigation)
+    bool print_navigation,
+    const char* rinex_prefix)
 {
     if (jsonl_filename == nullptr || jsonl_filename[0] == '\0' ||
         merkle_tree_xml == nullptr || merkle_tree_xml[0] == '\0' ||
@@ -802,8 +1097,37 @@ static int RunJsonMode(const char* jsonl_filename,
     PrintReasonCounts(engine_stats);
     PrintOsnmaEngineStatistics(engine_stats);
 
-    if (print_navigation)
-        PrintAuthenticatedNavigationDump(auth);
+    if (print_navigation ||
+        (rinex_prefix != nullptr && rinex_prefix[0] != '\0'))
+    {
+        const AuthenticatedNavigationRecords records =
+            CollectAuthenticatedNavigation(auth);
+
+        if (rinex_prefix != nullptr && rinex_prefix[0] != '\0')
+        {
+            std::string rinex_filename{};
+            int32_t rinex_record_count = 0;
+
+            if (!WriteAuthenticatedNavigationRinexFile(
+                records,
+                rinex_prefix,
+                rinex_filename,
+                rinex_record_count))
+            {
+                printf("Failed to write the RINEX navigation file for prefix: %s\n",
+                    rinex_prefix);
+                return 1;
+            }
+
+            printf("\nRINEX navigation output:\n");
+            printf("  file=%s\n", rinex_filename.c_str());
+            printf("  authenticated_ephemeris_records=%d\n",
+                rinex_record_count);
+        }
+
+        if (print_navigation)
+            PrintAuthenticatedNavigationDump(records);
+    }
 
     printf("Done.\n");
     return 0;
@@ -843,7 +1167,7 @@ int main(int argc, char** argv)
 
     if (std::strcmp(argv[1], "-json") == 0)
     {
-        if (argc != 5 && argc != 6)
+        if (argc < 5)
         {
             printf("Invalid -json arguments.\n\n");
             PrintUsage(argv[0]);
@@ -851,21 +1175,43 @@ int main(int argc, char** argv)
         }
 
         bool print_navigation = false;
+        const char* rinex_prefix = nullptr;
 
-        if (argc == 6)
+        for (int32_t arg_index = 5; arg_index < argc; ++arg_index)
         {
-            if (std::strcmp(argv[5], "--print-nav") != 0)
+            if (std::strcmp(argv[arg_index], "--print-nav") == 0)
             {
-                printf("Unknown -json option: %s\n\n", argv[5]);
-                PrintUsage(argv[0]);
-                return 1;
+                print_navigation = true;
+                continue;
             }
 
-            print_navigation = true;
+            if (std::strcmp(argv[arg_index], "--rinex-prefix") == 0)
+            {
+                if (arg_index + 1 >= argc)
+                {
+                    printf("Missing value after --rinex-prefix.\n\n");
+                    PrintUsage(argv[0]);
+                    return 1;
+                }
+
+                rinex_prefix = argv[++arg_index];
+                if (rinex_prefix[0] == '\0')
+                {
+                    printf("Empty --rinex-prefix value.\n\n");
+                    PrintUsage(argv[0]);
+                    return 1;
+                }
+                continue;
+            }
+
+            printf("Unknown -json option: %s\n\n", argv[arg_index]);
+            PrintUsage(argv[0]);
+            return 1;
         }
 
         return RunJsonMode(argv[2], argv[3], argv[4],
-            print_navigation);
+            print_navigation,
+            rinex_prefix);
     }
 
     printf("Unknown option: %s\n\n", argv[1]);
