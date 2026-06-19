@@ -1,11 +1,13 @@
 #include "osnma_official_test_vector_reader.h"
 
 #include <algorithm>
+#include <array>
+#include <charconv>
 #include <cctype>
 #include <cstdlib>
 #include <fstream>
-#include <regex>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace
@@ -231,26 +233,63 @@ bool OsnmaOfficialTestVectorReader::TryParseStartTimeFromFilename(const char* fi
 
     const std::string base = BasenameOnly(filename);
 
-    static const std::regex re(
-        R"(^([0-9]{1,2})_([A-Za-z]{3})_([0-9]{4})_GST_([0-9]{1,2})_([0-9]{1,2})_([0-9]{1,2})\.csv$)",
-        std::regex::ECMAScript);
-
-    std::smatch m{};
-
-    if (!std::regex_match(base, m, re) || m.size() < 7)
+    if (base.size() <= 4 || base.compare(base.size() - 4, 4, ".csv") != 0)
         return false;
 
-    const int32_t day = std::stoi(m[1].str());
+    const std::string_view stem(base.data(), base.size() - 4);
+    std::array<std::string_view, 7> parts{};
+    std::size_t first = 0;
+
+    for (std::size_t i = 0; i < parts.size() - 1; ++i)
+    {
+        const std::size_t separator = stem.find('_', first);
+        if (separator == std::string_view::npos)
+            return false;
+
+        parts[i] = stem.substr(first, separator - first);
+        first = separator + 1;
+    }
+
+    parts.back() = stem.substr(first);
+
+    if (parts.back().find('_') != std::string_view::npos ||
+        parts[3] != "GST")
+    {
+        return false;
+    }
+
+    auto parse_int =
+        [](std::string_view text, int32_t& value) -> bool
+        {
+            if (text.empty())
+                return false;
+
+            const char* begin = text.data();
+            const char* end = begin + text.size();
+            const auto result = std::from_chars(begin, end, value, 10);
+
+            return result.ec == std::errc{} && result.ptr == end;
+        };
+
+    int32_t day = 0;
+    int32_t year = 0;
+    int32_t hour = 0;
+    int32_t minute = 0;
+    int32_t second = 0;
+
+    if (!parse_int(parts[0], day) ||
+        !parse_int(parts[2], year) ||
+        !parse_int(parts[4], hour) ||
+        !parse_int(parts[5], minute) ||
+        !parse_int(parts[6], second))
+    {
+        return false;
+    }
 
     int32_t month = 0;
 
-    if (!MonthFromString(m[2].str(), month))
+    if (!MonthFromString(std::string(parts[1]), month))
         return false;
-
-    const int32_t year = std::stoi(m[3].str());
-    const int32_t hour = std::stoi(m[4].str());
-    const int32_t minute = std::stoi(m[5].str());
-    const int32_t second = std::stoi(m[6].str());
 
     if (day < 1 || day > 31 ||
         hour < 0 || hour > 23 ||

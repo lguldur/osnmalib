@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <string_view>
 
 #include "gnss_time.h"
 #include "nav_signal_source.h"
@@ -109,11 +110,13 @@ public:
 
 private:
     static bool ParseLine(const std::string& line,
+        int32_t wn,
+        double tow,
         PageCallback callback,
         Stats& stats,
         int32_t raw_to_word_bit_offset);
 
-    static bool HexToBytes(const std::string& hex,
+    static bool HexToBytes(std::string_view hex,
         std::uint8_t* out,
         int32_t out_size_bytes);
 

@@ -2,24 +2,24 @@
 #include "osnma_bit_utils.h"
 
 #include <algorithm>
-#include <cctype>
+#include <charconv>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <limits>
 #include <map>
-#include <regex>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace
 {
     constexpr int64_t GST_WEEK_SECONDS = 604800;
 
-    // The observed OSNMAlib JSONL files are written in chunks that are
-    // internally reverse-ordered. A 5-minute watermark is enough for the
-    // current files, and still tiny in memory.
+    // OSNMAlib JSONL files are written in chunks that can be internally
+    // reverse-ordered. Keep a bounded time window and release records in GST
+    // order before feeding the authenticator.
     constexpr int64_t JSON_REORDER_WINDOW_SECONDS = 600;
     constexpr int32_t JSON_REORDER_MAX_BUFFERED_SUBFRAMES = 64;
 
@@ -36,60 +36,385 @@ namespace
         std::vector<OsnmaRawJsonReader::Page> pages;
     };
 
+    class JsonCursor
+    {
+    public:
+        explicit JsonCursor(std::string_view text)
+            : m_current(text.data()),
+              m_end(text.data() + text.size())
+        {
+        }
+
+        void SkipWhitespace()
+        {
+            while (m_current < m_end)
+            {
+                const char c = *m_current;
+                if (c != ' ' && c != '\t' && c != '\r' && c != '\n')
+                    break;
+
+                ++m_current;
+            }
+        }
+
+        bool Consume(char expected)
+        {
+            SkipWhitespace();
+
+            if (m_current >= m_end || *m_current != expected)
+                return false;
+
+            ++m_current;
+            return true;
+        }
+
+        bool ReadString(std::string_view& value)
+        {
+            SkipWhitespace();
+
+            if (m_current >= m_end || *m_current != '"')
+                return false;
+
+            ++m_current;
+            const char* start = m_current;
+            bool escaped = false;
+
+            while (m_current < m_end)
+            {
+                const char c = *m_current++;
+
+                if (escaped)
+                {
+                    escaped = false;
+                    continue;
+                }
+
+                if (c == '\\')
+                {
+                    escaped = true;
+                    continue;
+                }
+
+                if (c == '"')
+                {
+                    value = std::string_view(start,
+                        static_cast<std::size_t>((m_current - 1) - start));
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        bool ReadNull()
+        {
+            SkipWhitespace();
+
+            if ((m_end - m_current) < 4 ||
+                m_current[0] != 'n' ||
+                m_current[1] != 'u' ||
+                m_current[2] != 'l' ||
+                m_current[3] != 'l')
+            {
+                return false;
+            }
+
+            m_current += 4;
+            return true;
+        }
+
+        bool ReadInt32(int32_t& value)
+        {
+            std::string_view token{};
+            if (!ReadNumberToken(token))
+                return false;
+
+            if (!token.empty() && token.front() == '+')
+                token.remove_prefix(1);
+
+            const char* first = token.data();
+            const char* last = first + token.size();
+            const auto result = std::from_chars(first, last, value, 10);
+
+            return result.ec == std::errc{} && result.ptr == last;
+        }
+
+        bool ReadDouble(double& value)
+        {
+            std::string_view token{};
+            if (!ReadNumberToken(token))
+                return false;
+
+            if (!token.empty() && token.front() == '+')
+                token.remove_prefix(1);
+
+            const char* first = token.data();
+            const char* last = first + token.size();
+            const auto result = std::from_chars(first,
+                last,
+                value,
+                std::chars_format::general);
+
+            return result.ec == std::errc{} && result.ptr == last;
+        }
+
+        bool SkipValue()
+        {
+            SkipWhitespace();
+
+            if (m_current >= m_end)
+                return false;
+
+            if (*m_current == '"')
+            {
+                std::string_view ignored{};
+                return ReadString(ignored);
+            }
+
+            if (*m_current == '{')
+            {
+                ++m_current;
+                SkipWhitespace();
+
+                if (m_current < m_end && *m_current == '}')
+                {
+                    ++m_current;
+                    return true;
+                }
+
+                while (m_current < m_end)
+                {
+                    std::string_view key{};
+                    if (!ReadString(key) || !Consume(':') || !SkipValue())
+                        return false;
+
+                    SkipWhitespace();
+
+                    if (m_current < m_end && *m_current == '}')
+                    {
+                        ++m_current;
+                        return true;
+                    }
+
+                    if (m_current >= m_end || *m_current != ',')
+                        return false;
+
+                    ++m_current;
+                }
+
+                return false;
+            }
+
+            if (*m_current == '[')
+            {
+                ++m_current;
+                SkipWhitespace();
+
+                if (m_current < m_end && *m_current == ']')
+                {
+                    ++m_current;
+                    return true;
+                }
+
+                while (m_current < m_end)
+                {
+                    if (!SkipValue())
+                        return false;
+
+                    SkipWhitespace();
+
+                    if (m_current < m_end && *m_current == ']')
+                    {
+                        ++m_current;
+                        return true;
+                    }
+
+                    if (m_current >= m_end || *m_current != ',')
+                        return false;
+
+                    ++m_current;
+                }
+
+                return false;
+            }
+
+            if (ReadNull())
+                return true;
+
+            if (ConsumeLiteral("true") || ConsumeLiteral("false"))
+                return true;
+
+            std::string_view number{};
+            return ReadNumberToken(number);
+        }
+
+    private:
+        bool ConsumeLiteral(std::string_view literal)
+        {
+            SkipWhitespace();
+
+            if (static_cast<std::size_t>(m_end - m_current) < literal.size())
+                return false;
+
+            if (std::string_view(m_current, literal.size()) != literal)
+                return false;
+
+            m_current += literal.size();
+            return true;
+        }
+
+        bool ReadNumberToken(std::string_view& token)
+        {
+            SkipWhitespace();
+
+            const char* start = m_current;
+
+            if (m_current < m_end && (*m_current == '-' || *m_current == '+'))
+                ++m_current;
+
+            const char* integer_start = m_current;
+            while (m_current < m_end && *m_current >= '0' && *m_current <= '9')
+                ++m_current;
+
+            if (m_current == integer_start)
+            {
+                m_current = start;
+                return false;
+            }
+
+            if (m_current < m_end && *m_current == '.')
+            {
+                ++m_current;
+                const char* fractional_start = m_current;
+
+                while (m_current < m_end && *m_current >= '0' && *m_current <= '9')
+                    ++m_current;
+
+                if (m_current == fractional_start)
+                {
+                    m_current = start;
+                    return false;
+                }
+            }
+
+            if (m_current < m_end && (*m_current == 'e' || *m_current == 'E'))
+            {
+                ++m_current;
+
+                if (m_current < m_end && (*m_current == '-' || *m_current == '+'))
+                    ++m_current;
+
+                const char* exponent_start = m_current;
+                while (m_current < m_end && *m_current >= '0' && *m_current <= '9')
+                    ++m_current;
+
+                if (m_current == exponent_start)
+                {
+                    m_current = start;
+                    return false;
+                }
+            }
+
+            token = std::string_view(start,
+                static_cast<std::size_t>(m_current - start));
+            return true;
+        }
+
+    private:
+        const char* m_current = nullptr;
+        const char* m_end = nullptr;
+    };
+
     static int64_t ToGstSeconds(int32_t wn, double tow)
     {
         return static_cast<int64_t>(wn) * GST_WEEK_SECONDS +
             static_cast<int64_t>(std::llround(tow));
     }
 
-    static bool ExtractLineGst(const std::string& line, JsonLineGst& out)
+    static bool FindJsonValue(std::string_view line,
+        std::string_view quoted_key,
+        std::string_view& value_tail)
     {
-        // Current OSNMAlib.eu quick JSONL export:
-        //     {"WN":1397,"TOW":150,...}
-        static const std::regex wn_re(
-            R"json("WN"\s*:\s*([0-9]+))json",
-            std::regex::ECMAScript);
+        const std::size_t key_pos = line.find(quoted_key);
+        if (key_pos == std::string_view::npos)
+            return false;
 
-        static const std::regex tow_re(
-            R"json("TOW"\s*:\s*([-+]?[0-9]+(?:\.[0-9]+)?))json",
-            std::regex::ECMAScript);
+        std::size_t pos = key_pos + quoted_key.size();
 
-        // Schema-style status log:
-        //     "GST_subframe": [WN, TOW]
-        static const std::regex gst_subframe_re(
-            R"json("GST_subframe"\s*:\s*\[\s*([0-9]+)\s*,\s*([-+]?[0-9]+(?:\.[0-9]+)?)\s*\])json",
-            std::regex::ECMAScript);
-
-        std::smatch m{};
-
-        if (std::regex_search(line, m, gst_subframe_re) && m.size() >= 3)
+        while (pos < line.size() &&
+            (line[pos] == ' ' || line[pos] == '\t' ||
+             line[pos] == '\r' || line[pos] == '\n'))
         {
-            out.wn = static_cast<int32_t>(std::stoi(m[1].str()));
-            out.tow = std::stod(m[2].str());
-            return true;
+            ++pos;
         }
 
-        if (!std::regex_search(line, m, wn_re) || m.size() < 2)
+        if (pos >= line.size() || line[pos] != ':')
             return false;
 
-        out.wn = static_cast<int32_t>(std::stoi(m[1].str()));
-
-        if (!std::regex_search(line, m, tow_re) || m.size() < 2)
-            return false;
-
-        out.tow = std::stod(m[1].str());
+        ++pos;
+        value_tail = line.substr(pos);
         return true;
     }
 
-    static int32_t CountBufferedSubframes(
-        const std::map<int64_t, std::vector<JsonPendingSubframe>>& buffer)
+    static bool ParseGstPair(std::string_view value_tail,
+        JsonLineGst& out)
     {
-        int32_t count = 0;
+        JsonCursor cursor(value_tail);
 
-        for (const auto& kv : buffer)
-            count += static_cast<int32_t>(kv.second.size());
+        if (!cursor.Consume('[') ||
+            !cursor.ReadInt32(out.wn) ||
+            !cursor.Consume(',') ||
+            !cursor.ReadDouble(out.tow) ||
+            !cursor.Consume(']'))
+        {
+            return false;
+        }
 
-        return count;
+        return true;
+    }
+
+    static bool ExtractLineGst(std::string_view line, JsonLineGst& out)
+    {
+        // Schema-style status log:
+        //     "GST_subframe": [WN, TOW]
+        std::string_view value_tail{};
+
+        if (FindJsonValue(line, "\"GST_subframe\"", value_tail))
+            return ParseGstPair(value_tail, out);
+
+        // Current OSNMAlib.eu quick JSONL export:
+        //     {"WN":1397,"TOW":150,...}
+        if (!FindJsonValue(line, "\"WN\"", value_tail))
+            return false;
+
+        {
+            JsonCursor cursor(value_tail);
+            if (!cursor.ReadInt32(out.wn))
+                return false;
+        }
+
+        if (!FindJsonValue(line, "\"TOW\"", value_tail))
+            return false;
+
+        {
+            JsonCursor cursor(value_tail);
+            if (!cursor.ReadDouble(out.tow))
+                return false;
+        }
+
+        return true;
+    }
+
+    static bool ParseDecimalInt32(std::string_view text, int32_t& value)
+    {
+        if (text.empty())
+            return false;
+
+        const char* first = text.data();
+        const char* last = first + text.size();
+        const auto result = std::from_chars(first, last, value, 10);
+
+        return result.ec == std::errc{} && result.ptr == last;
     }
 }
 
@@ -115,6 +440,7 @@ bool OsnmaRawJsonReader::ReadFile(const char* filename,
         return false;
 
     std::map<int64_t, std::vector<JsonPendingSubframe>> reorder_buffer;
+    int32_t buffered_subframe_count = 0;
     int64_t newest_seen = std::numeric_limits<int64_t>::min();
     bool have_newest_seen = false;
 
@@ -126,6 +452,8 @@ bool OsnmaRawJsonReader::ReadFile(const char* filename,
         auto it = reorder_buffer.begin();
         std::vector<JsonPendingSubframe> pending_list = std::move(it->second);
         reorder_buffer.erase(it);
+
+        buffered_subframe_count -= static_cast<int32_t>(pending_list.size());
 
         std::sort(pending_list.begin(),
             pending_list.end(),
@@ -148,26 +476,18 @@ bool OsnmaRawJsonReader::ReadFile(const char* filename,
         return true;
     };
 
-    auto update_max_depth = [&]()
-    {
-        const int32_t depth = CountBufferedSubframes(reorder_buffer);
-        if (depth > local_stats.reorder_max_buffered_subframes)
-            local_stats.reorder_max_buffered_subframes = depth;
-    };
-
     auto flush_ready = [&]() -> bool
     {
         while (!reorder_buffer.empty())
         {
             const int64_t oldest = reorder_buffer.begin()->first;
-            const int32_t depth = CountBufferedSubframes(reorder_buffer);
 
             const bool watermark_ready =
                 have_newest_seen &&
                 ((newest_seen - oldest) >= JSON_REORDER_WINDOW_SECONDS);
 
             const bool buffer_too_deep =
-                depth > JSON_REORDER_MAX_BUFFERED_SUBFRAMES;
+                buffered_subframe_count > JSON_REORDER_MAX_BUFFERED_SUBFRAMES;
 
             if (!watermark_ready && !buffer_too_deep)
                 break;
@@ -215,9 +535,12 @@ bool OsnmaRawJsonReader::ReadFile(const char* filename,
         JsonPendingSubframe pending{};
         pending.gst_seconds = line_gst_seconds;
         pending.input_line = local_stats.line_count;
+        pending.pages.reserve(256);
 
         const bool ok =
             ParseLine(line,
+                gst.wn,
+                gst.tow,
                 [&](const Page& page) -> bool
                 {
                     pending.pages.push_back(page);
@@ -230,8 +553,11 @@ bool OsnmaRawJsonReader::ReadFile(const char* filename,
             return false;
 
         reorder_buffer[line_gst_seconds].push_back(std::move(pending));
+        ++buffered_subframe_count;
         ++local_stats.reorder_buffered_subframes;
-        update_max_depth();
+
+        if (buffered_subframe_count > local_stats.reorder_max_buffered_subframes)
+            local_stats.reorder_max_buffered_subframes = buffered_subframe_count;
 
         if (!flush_ready())
             return false;
@@ -288,190 +614,235 @@ bool OsnmaRawJsonReader::FeedFileToAuthenticator(const char* filename,
 }
 
 bool OsnmaRawJsonReader::ParseLine(const std::string& line,
+    int32_t wn,
+    double tow,
     PageCallback callback,
     Stats& stats,
     int32_t raw_to_word_bit_offset)
 {
-    /*
-        Quick-and-dirty parser for OSNMAlib.eu JSONL lines like:
+    ++stats.subframe_count;
 
-        {
-            "WN":1397,
-            "TOW":150,
-            "svid_bits":{
-                "2":{
-                    "E1-B":["...", "..."],
-                    "E5b-I":["...", "..."]
-                }
-            }
-        }
-
-        This intentionally does not try to be a general JSON parser.
-    */
-
-    JsonLineGst gst{};
-    if (!ExtractLineGst(line, gst))
+    std::string_view value_tail{};
+    if (!FindJsonValue(line, "\"svid_bits\"", value_tail))
     {
         ++stats.malformed_line_count;
         return true;
     }
 
-    const int32_t wn = gst.wn;
-    const double tow = gst.tow;
+    JsonCursor cursor(value_tail);
 
-    ++stats.subframe_count;
+    if (!cursor.Consume('{'))
+    {
+        ++stats.malformed_line_count;
+        return true;
+    }
 
-    /*
-        Match each satellite block:
-            "2": { ... }
+    if (cursor.Consume('}'))
+        return true;
 
-        This works for the current flat OSNMAlib.eu structure because the
-        satellite object contains arrays but no nested objects.
-    */
-    static const std::regex svid_block_re(
-        R"json("([0-9]+)"\s*:\s*\{([^{}]*)\})json",
-        std::regex::ECMAScript);
-
-
-    static const std::regex e1b_array_re(
-        R"json("E1-B"\s*:\s*\[([^\]]*)\])json",
-        std::regex::ECMAScript);
-
-            const std::sregex_iterator end{};
-
-            for (std::sregex_iterator it(line.begin(), line.end(), svid_block_re);
-                it != end;
-                ++it)
-            {
-                const std::smatch& sm = *it;
-
-                if (sm.size() < 3)
-                    continue;
-
-                const int32_t prn =
-                    static_cast<int32_t>(std::stoi(sm[1].str()));
-
-                const std::string block =
-                    sm[2].str();
-
-                std::smatch e1b_match{};
-
-                if (!std::regex_search(block, e1b_match, e1b_array_re) ||
-                    e1b_match.size() < 2)
-                {
-                    ++stats.missing_e1b_array_count;
-                    continue;
-                }
-
-                const std::string e1b_array =
-                    e1b_match[1].str();
-
-                static const std::regex e1b_item_re(
-                    R"json("([0-9A-Fa-f]{60})"|\bnull\b)json",
-                    std::regex::ECMAScript);
-
-                int32_t page_index = 0;
-
-                for (std::sregex_iterator item(e1b_array.begin(), e1b_array.end(), e1b_item_re);
-                    item != end;
-                    ++item)
-                {
-                    const std::smatch& im = *item;
-
-                    if (im.size() >= 2 && im[1].matched)
-                    {
-                        const std::string hex =
-                            im[1].str();
-
-                        Page page{};
-                        page.prn = prn;
-                        page.page_index = page_index;
-
-                        page.page_time.wn = wn;
-                        page.page_time.tow = tow + 2.0 * static_cast<double>(page_index);
-
-                        if (!HexToBytes(hex,
-                            page.raw_240b.data(),
-                            static_cast<int32_t>(page.raw_240b.size())))
-                        {
-                            ++stats.malformed_hex_count;
-                            ++page_index;
-                            continue;
-                        }
-
-                        static constexpr int32_t RAW_HALF_BITS = 120;
-
-                        /*
-                            Reconstruct the 128-bit Galileo I/NAV word from
-                            the two 120-bit page parts. The navigation word is
-                            not a contiguous slice of the 240-bit raw page:
-
-                                raw[2 .. 114] || raw[122 .. 138]
-
-                            The previous JSON reader copied a contiguous slice
-                            starting at raw bit 1. That still exposed the OSNMA
-                            reserved field correctly, so DSM/KROOT/TESLA could
-                            verify, but it shifted/corrupted the navigation data
-                            used in ADKD0/4/12 tag MAC inputs.
-                        */
-                        if (!CopyInavWordFromRawPage(page.raw_240b.data(),
-                            page.even_128b.data()))
-                        {
-                            ++stats.malformed_hex_count;
-                            ++page_index;
-                            continue;
-                        }
-
-                        const int32_t odd_offset =
-                            (raw_to_word_bit_offset == 0)
-                            ? RAW_HALF_BITS
-                            : RAW_HALF_BITS - 1;
-
-                        const int32_t odd_bit_count =
-                            RAW_PAGE_BITS - odd_offset;
-
-                        if (odd_bit_count <= 0 || odd_bit_count > OSNMA_WORD_BITS)
-                        {
-                            ++stats.malformed_hex_count;
-                            ++page_index;
-                            continue;
-                        }
-
-                        if (!CopyBitsMsb0Shifted(page.raw_240b.data(),
-                            odd_offset,
-                            RAW_PAGE_BITS,
-                            page.odd_128b.data(),
-                            odd_bit_count))
-                        {
-                            ++stats.malformed_hex_count;
-                            ++page_index;
-                            continue;
-                        }
-
-                        const int32_t wt =
-                            GetUnsignedBitsMsb0(page.even_128b.data(), 0, 6);
-
-                        if (wt >= 0 && wt < static_cast<int32_t>(stats.wt_count.size()))
-                            ++stats.wt_count[wt];
-
-                        ++stats.page_count;
-
-                        if (!callback(page))
-                            return false;
-                    }
-                    else
-                    {
-                        ++stats.null_page_count;
-                    }
-
-                    ++page_index;
-                }
-            }
-
+    while (true)
+    {
+        std::string_view prn_text{};
+        if (!cursor.ReadString(prn_text) || !cursor.Consume(':'))
+        {
+            ++stats.malformed_line_count;
             return true;
+        }
+
+        int32_t prn = -1;
+        const bool numeric_prn = ParseDecimalInt32(prn_text, prn);
+
+        if (!numeric_prn)
+        {
+            if (!cursor.SkipValue())
+            {
+                ++stats.malformed_line_count;
+                return true;
+            }
+        }
+        else
+        {
+            if (!cursor.Consume('{'))
+            {
+                if (!cursor.SkipValue())
+                {
+                    ++stats.malformed_line_count;
+                    return true;
+                }
+
+                ++stats.missing_e1b_array_count;
+            }
+            else
+            {
+                bool found_e1b = false;
+
+                if (!cursor.Consume('}'))
+                {
+                    while (true)
+                    {
+                        std::string_view signal_name{};
+                        if (!cursor.ReadString(signal_name) || !cursor.Consume(':'))
+                        {
+                            ++stats.malformed_line_count;
+                            return true;
+                        }
+
+                        if (signal_name == "E1-B")
+                        {
+                            found_e1b = true;
+
+                            if (!cursor.Consume('['))
+                            {
+                                ++stats.malformed_line_count;
+                                return true;
+                            }
+
+                            int32_t page_index = 0;
+
+                            if (!cursor.Consume(']'))
+                            {
+                                while (true)
+                                {
+                                    bool valid_item = false;
+                                    std::string_view hex{};
+
+                                    if (cursor.ReadNull())
+                                    {
+                                        ++stats.null_page_count;
+                                        valid_item = true;
+                                    }
+                                    else if (cursor.ReadString(hex))
+                                    {
+                                        valid_item = true;
+
+                                        Page page{};
+                                        page.prn = prn;
+                                        page.page_index = page_index;
+                                        page.page_time.wn = wn;
+                                        page.page_time.tow =
+                                            tow + 2.0 * static_cast<double>(page_index);
+
+                                        if (!HexToBytes(hex,
+                                            page.raw_240b.data(),
+                                            static_cast<int32_t>(page.raw_240b.size())))
+                                        {
+                                            ++stats.malformed_hex_count;
+                                        }
+                                        else if (!CopyInavWordFromRawPage(
+                                            page.raw_240b.data(),
+                                            page.even_128b.data()))
+                                        {
+                                            ++stats.malformed_hex_count;
+                                        }
+                                        else
+                                        {
+                                            static constexpr int32_t RAW_HALF_BITS = 120;
+
+                                            const int32_t odd_offset =
+                                                (raw_to_word_bit_offset == 0)
+                                                ? RAW_HALF_BITS
+                                                : RAW_HALF_BITS - 1;
+
+                                            const int32_t odd_bit_count =
+                                                RAW_PAGE_BITS - odd_offset;
+
+                                            if (odd_bit_count <= 0 ||
+                                                odd_bit_count > OSNMA_WORD_BITS ||
+                                                !CopyBitsMsb0Shifted(
+                                                    page.raw_240b.data(),
+                                                    odd_offset,
+                                                    RAW_PAGE_BITS,
+                                                    page.odd_128b.data(),
+                                                    odd_bit_count))
+                                            {
+                                                ++stats.malformed_hex_count;
+                                            }
+                                            else
+                                            {
+                                                const int32_t wt =
+                                                    GetUnsignedBitsMsb0(
+                                                        page.even_128b.data(),
+                                                        0,
+                                                        6);
+
+                                                if (wt >= 0 &&
+                                                    wt < static_cast<int32_t>(
+                                                        stats.wt_count.size()))
+                                                {
+                                                    ++stats.wt_count[wt];
+                                                }
+
+                                                ++stats.page_count;
+
+                                                if (!callback(page))
+                                                    return false;
+                                            }
+                                        }
+                                    }
+
+                                    if (!valid_item)
+                                    {
+                                        if (!cursor.SkipValue())
+                                        {
+                                            ++stats.malformed_line_count;
+                                            return true;
+                                        }
+
+                                        ++stats.malformed_hex_count;
+                                    }
+
+                                    ++page_index;
+
+                                    if (cursor.Consume(']'))
+                                        break;
+
+                                    if (!cursor.Consume(','))
+                                    {
+                                        ++stats.malformed_line_count;
+                                        return true;
+                                    }
+                                }
+                            }
+                        }
+                        else
+                        {
+                            if (!cursor.SkipValue())
+                            {
+                                ++stats.malformed_line_count;
+                                return true;
+                            }
+                        }
+
+                        if (cursor.Consume('}'))
+                            break;
+
+                        if (!cursor.Consume(','))
+                        {
+                            ++stats.malformed_line_count;
+                            return true;
+                        }
+                    }
+                }
+
+                if (!found_e1b)
+                    ++stats.missing_e1b_array_count;
+            }
+        }
+
+        if (cursor.Consume('}'))
+            break;
+
+        if (!cursor.Consume(','))
+        {
+            ++stats.malformed_line_count;
+            return true;
+        }
+    }
+
+    return true;
 }
 
-bool OsnmaRawJsonReader::HexToBytes(const std::string& hex,
+bool OsnmaRawJsonReader::HexToBytes(std::string_view hex,
     std::uint8_t* out,
     int32_t out_size_bytes)
 {
@@ -499,10 +870,10 @@ bool OsnmaRawJsonReader::HexToBytes(const std::string& hex,
     for (int32_t i = 0; i < out_size_bytes; ++i)
     {
         const int32_t hi =
-            hex_value(hex[static_cast<size_t>(2 * i)]);
+            hex_value(hex[static_cast<std::size_t>(2 * i)]);
 
         const int32_t lo =
-            hex_value(hex[static_cast<size_t>(2 * i + 1)]);
+            hex_value(hex[static_cast<std::size_t>(2 * i + 1)]);
 
         if (hi < 0 || lo < 0)
             return false;
@@ -513,7 +884,6 @@ bool OsnmaRawJsonReader::HexToBytes(const std::string& hex,
 
     return true;
 }
-
 
 bool OsnmaRawJsonReader::CopyInavWordFromRawPage(const std::uint8_t* raw_240b,
     std::uint8_t* dst_128b)
@@ -554,7 +924,7 @@ bool OsnmaRawJsonReader::CopyBitsMsb0Shifted(const std::uint8_t* src,
 
     std::memset(dst,
         0,
-        static_cast<size_t>(dst_size_bytes));
+        static_cast<std::size_t>(dst_size_bytes));
 
     for (int32_t i = 0; i < dst_bit_count; ++i)
     {

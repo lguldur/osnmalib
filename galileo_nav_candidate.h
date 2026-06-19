@@ -107,7 +107,7 @@ private:
     using Key = std::tuple<int32_t, int32_t, int32_t>;
 
     static constexpr double PARTIAL_TIMEOUT_S = 240.0;
-    static constexpr double COMPLETE_LIFETIME_S = 172800.0;
+    static constexpr double COMPLETE_LIFETIME_S = 1200.0;
 
     // WT6-anchored ADKD=4 timing pair guard.
     // This is intentionally conservative and prevents mixing unrelated WT6/WT10.
