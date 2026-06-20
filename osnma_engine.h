@@ -136,6 +136,14 @@ public:
     int32_t AuthenticatedCedStatusCount() const;
     int32_t AuthenticatedTimingCount() const;
 
+    bool PopPegasusEphRow(PegasusEphRow& row);
+    bool PopPegasusIonoRow(PegasusIonoRow& row);
+    bool PopPegasusDtimeRow(PegasusDtimeRow& row);
+
+    int32_t PegasusEphRowCount() const;
+    int32_t PegasusIonoRowCount() const;
+    int32_t PegasusDtimeRowCount() const;
+
 private:
     static constexpr int32_t MAX_PENDING_MACKS = 64;
     static constexpr double PENDING_MACK_LIFETIME_S = 900.0;

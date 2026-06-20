@@ -11,6 +11,7 @@
 #include "nav_signal_source.h"
 #include "osnma_mack.h"
 #include "osnma_types.h"
+#include "pegasus_nav_rows.h"
 
 /*
     One authenticated ADKD=0/12 CED/status object.
@@ -151,6 +152,23 @@ public:
         NavSignalSource source,
         int32_t raw_source,
         GalileoAuthenticatedTiming& out);
+
+    /*
+        Build one-to-one Pegasus CSV row structures from authenticated
+        diagnostic records. The output week numbers are continuous GPS weeks.
+    */
+    static bool MakePegasusEphRow(
+        const GalileoAuthenticatedCedStatus& data,
+        PegasusEphRow& out);
+
+    static bool MakePegasusIonoRow(
+        const GalileoAuthenticatedCedStatus& data,
+        PegasusIonoRow& out);
+
+    static int32_t MakePegasusDtimeRows(
+        const GalileoAuthenticatedTiming& data,
+        PegasusDtimeRow* out_rows,
+        int32_t max_rows);
 };
 
 class GalileoAuthDataFifo
@@ -166,6 +184,18 @@ public:
 
     int32_t CedStatusCount() const;
     int32_t TimingCount() const;
+
+    /*
+        Row-level output. Each returned structure maps directly to one row of
+        .eph, .iono or .dtime respectively.
+    */
+    bool PopPegasusEphRow(PegasusEphRow& row);
+    bool PopPegasusIonoRow(PegasusIonoRow& row);
+    bool PopPegasusDtimeRow(PegasusDtimeRow& row);
+
+    int32_t PegasusEphRowCount() const;
+    int32_t PegasusIonoRowCount() const;
+    int32_t PegasusDtimeRowCount() const;
 
     /*
         Legacy standalone queues retained for source compatibility. They are
@@ -188,6 +218,10 @@ public:
 private:
     std::deque<GalileoAuthenticatedCedStatus> ced_status_;
     std::deque<GalileoAuthenticatedTiming> timing_;
+
+    std::deque<PegasusEphRow> pegasus_eph_rows_;
+    std::deque<PegasusIonoRow> pegasus_iono_rows_;
+    std::deque<PegasusDtimeRow> pegasus_dtime_rows_;
 
     std::deque<AuthEphRecord> eph_;
     std::deque<AuthIonoRecord> iono_;

@@ -810,6 +810,7 @@ OsnmaSelfTest::Result OsnmaSelfTest::RunAll()
     TestMacseqWaitsForFutureKey(result);
     TestAuthenticatedCedDecode(result);
     TestAuthenticatedTimingDecode(result);
+    TestPegasusRowMapping(result);
     TestCedCompletionEpochPreserved(result);
 
     return result;
@@ -1278,6 +1279,150 @@ bool OsnmaSelfTest::TestMacseqWaitsForFutureKey(Result& result)
     }
 
     return true;
+}
+
+bool OsnmaSelfTest::TestPegasusRowMapping(Result& result)
+{
+    ++result.test_count;
+
+    GalileoAuthenticatedCedStatus ced{};
+    ced.navigation_time = GnssTime{1397, 600.0};
+    ced.authentication_time = GnssTime{1397, 660.0};
+    ced.ephemeris_transmission_time = GnssTime{1397, 620.0};
+    ced.wt5_page_time = GnssTime{1397, 618.0};
+    ced.prn = 7;
+    ced.auth_bits = 40;
+    ced.nav_fingerprint = 0x123456789ABCDEF0ull;
+    ced.authentication_adkd = OsnmaAdkd::InavCed;
+    ced.ephemeris_valid = true;
+    ced.ionosphere_valid = true;
+    ced.sisa = 33u;
+
+    ced.ephemeris.WNToc = 1397u;
+    ced.ephemeris.Toc = 600;
+    ced.ephemeris.WNToe = 1397u;
+    ced.ephemeris.Toe = 600;
+    ced.ephemeris.IODNav = 42u;
+    ced.ephemeris.af0 = 1.0;
+    ced.ephemeris.af1 = 2.0;
+    ced.ephemeris.af2 = 3.0;
+    ced.ephemeris.Crs = 4.0;
+    ced.ephemeris.DeltaN = 5.0;
+    ced.ephemeris.M0 = 6.0;
+    ced.ephemeris.Cuc = 7.0;
+    ced.ephemeris.Ecc = 8.0;
+    ced.ephemeris.Cus = 9.0;
+    ced.ephemeris.sqrtA = 10.0;
+    ced.ephemeris.Cic = 11.0;
+    ced.ephemeris.Omega0 = 12.0;
+    ced.ephemeris.Cis = 13.0;
+    ced.ephemeris.i0 = 14.0;
+    ced.ephemeris.Crc = 15.0;
+    ced.ephemeris.Omega = 16.0;
+    ced.ephemeris.OmegaDot = 17.0;
+    ced.ephemeris.IDot = 18.0;
+    ced.ephemeris.DataSources = 0x201u;
+    ced.ephemeris.SVHealth = 0x142u;
+    ced.ephemeris.BGD_L1E5a = 19.0;
+    ced.ephemeris.BGD_L1E5b = 20.0;
+
+    ced.ionosphere.ai0 = 21.0;
+    ced.ionosphere.ai1 = 22.0;
+    ced.ionosphere.ai2 = 23.0;
+    ced.ionosphere.StormFlags = 0x15u;
+
+    PegasusEphRow eph{};
+    if (!Check(result,
+        GalileoInavDecoder::MakePegasusEphRow(ced, eph),
+        "Pegasus eph-row construction failed"))
+    {
+        return false;
+    }
+
+    if (!Check(result,
+        eph.rx_week == 2421 &&
+        eph.auth_week == 2421 &&
+        eph.toc_week == 2421 &&
+        eph.toe_week == 2421 &&
+        eph.prn == 7 &&
+        eph.auth_status == AuthState::Yes &&
+        eph.auth_reason == AuthReason::None &&
+        eph.iodnav == 42 &&
+        eph.data_sources == 0x201u &&
+        eph.sv_health == 0x142u &&
+        std::fabs(eph.sisa - 0.33) < 1e-15,
+        "Pegasus eph-row mapping failed"))
+    {
+        return false;
+    }
+
+    PegasusIonoRow iono{};
+    if (!Check(result,
+        GalileoInavDecoder::MakePegasusIonoRow(ced, iono),
+        "Pegasus iono-row construction failed"))
+    {
+        return false;
+    }
+
+    if (!Check(result,
+        iono.rx_week == 2421 &&
+        iono.rx_tom == 618.0 &&
+        iono.storm_flags == 0x15u &&
+        iono.ai0 == 21.0,
+        "Pegasus iono-row mapping failed"))
+    {
+        return false;
+    }
+
+    GalileoAuthenticatedTiming timing{};
+    timing.authentication_time = GnssTime{1397, 690.0};
+    timing.wt6_page_time = GnssTime{1397, 624.0};
+    timing.wt10_page_time = GnssTime{1397, 628.0};
+    timing.prn = 7;
+    timing.auth_bits = 40;
+    timing.nav_fingerprint = 0xFEDCBA9876543210ull;
+    timing.authentication_adkd = OsnmaAdkd::InavTiming;
+    timing.utc_valid = true;
+    timing.ggto_valid = true;
+    timing.utc.a0 = 1.25;
+    timing.utc.a1 = -2.5;
+    timing.utc.T0_UTC = 43200;
+    timing.utc.WN0_UTC = 1397;
+    timing.a0g = 3.25;
+    timing.a1g = -4.5;
+    timing.t0g = 14400;
+    timing.wn0g = 1397;
+
+    std::array<PegasusDtimeRow, 2> dtime{};
+    const int32_t dtime_count =
+        GalileoInavDecoder::MakePegasusDtimeRows(
+            timing,
+            dtime.data(),
+            static_cast<int32_t>(dtime.size()));
+
+    if (!Check(result,
+        dtime_count == 2 &&
+        dtime[0].target_time_system == PegasusTimeSystem::Utc &&
+        dtime[0].rx_week == 2421 &&
+        dtime[0].reference_week == 2421 &&
+        dtime[0].reference_tom == 43200.0 &&
+        dtime[1].target_time_system == PegasusTimeSystem::Gps &&
+        dtime[1].rx_tom == 628.0 &&
+        dtime[1].reference_tom == 14400.0,
+        "Pegasus dtime-row mapping failed"))
+    {
+        return false;
+    }
+
+    GalileoAuthDataFifo fifo{};
+    fifo.PushCedStatus(ced);
+    fifo.PushTiming(timing);
+
+    return Check(result,
+        fifo.PegasusEphRowCount() == 1 &&
+        fifo.PegasusIonoRowCount() == 1 &&
+        fifo.PegasusDtimeRowCount() == 2,
+        "Pegasus row FIFO counts failed");
 }
 
 bool OsnmaSelfTest::TestCedCompletionEpochPreserved(Result& result)

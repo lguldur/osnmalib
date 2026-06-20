@@ -42,6 +42,15 @@ public:
     int32_t AuthenticatedCedStatusCount() const;
     int32_t AuthenticatedTimingCount() const;
 
+    /* Direct one-row-per-record Pegasus output. */
+    bool PopPegasusEphRow(PegasusEphRow& row);
+    bool PopPegasusIonoRow(PegasusIonoRow& row);
+    bool PopPegasusDtimeRow(PegasusDtimeRow& row);
+
+    int32_t PegasusEphRowCount() const;
+    int32_t PegasusIonoRowCount() const;
+    int32_t PegasusDtimeRowCount() const;
+
     bool SetMerkleRoot(const std::uint8_t* root_32_bytes);
 
     bool AddTrustedPublicKey(const OsnmaDsmPkr& public_key);

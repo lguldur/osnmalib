@@ -50,6 +50,37 @@ int32_t OsnmaEngine::AuthenticatedTimingCount() const
     return authenticated_nav_data_.TimingCount();
 }
 
+
+bool OsnmaEngine::PopPegasusEphRow(PegasusEphRow& row)
+{
+    return authenticated_nav_data_.PopPegasusEphRow(row);
+}
+
+bool OsnmaEngine::PopPegasusIonoRow(PegasusIonoRow& row)
+{
+    return authenticated_nav_data_.PopPegasusIonoRow(row);
+}
+
+bool OsnmaEngine::PopPegasusDtimeRow(PegasusDtimeRow& row)
+{
+    return authenticated_nav_data_.PopPegasusDtimeRow(row);
+}
+
+int32_t OsnmaEngine::PegasusEphRowCount() const
+{
+    return authenticated_nav_data_.PegasusEphRowCount();
+}
+
+int32_t OsnmaEngine::PegasusIonoRowCount() const
+{
+    return authenticated_nav_data_.PegasusIonoRowCount();
+}
+
+int32_t OsnmaEngine::PegasusDtimeRowCount() const
+{
+    return authenticated_nav_data_.PegasusDtimeRowCount();
+}
+
 void OsnmaEngine::SetNavTimingMode(NavTimingMode mode)
 {
     nav_candidate_store_.SetNavTimingMode(mode);

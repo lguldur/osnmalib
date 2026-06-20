@@ -160,6 +160,37 @@ int32_t OsnmaAuthenticator::AuthenticatedTimingCount() const
     return engine_.AuthenticatedTimingCount();
 }
 
+
+bool OsnmaAuthenticator::PopPegasusEphRow(PegasusEphRow& row)
+{
+    return engine_.PopPegasusEphRow(row);
+}
+
+bool OsnmaAuthenticator::PopPegasusIonoRow(PegasusIonoRow& row)
+{
+    return engine_.PopPegasusIonoRow(row);
+}
+
+bool OsnmaAuthenticator::PopPegasusDtimeRow(PegasusDtimeRow& row)
+{
+    return engine_.PopPegasusDtimeRow(row);
+}
+
+int32_t OsnmaAuthenticator::PegasusEphRowCount() const
+{
+    return engine_.PegasusEphRowCount();
+}
+
+int32_t OsnmaAuthenticator::PegasusIonoRowCount() const
+{
+    return engine_.PegasusIonoRowCount();
+}
+
+int32_t OsnmaAuthenticator::PegasusDtimeRowCount() const
+{
+    return engine_.PegasusDtimeRowCount();
+}
+
 bool OsnmaAuthenticator::SetMerkleRoot(const std::uint8_t* root_32_bytes)
 {
     return engine_.SetMerkleRoot(root_32_bytes);

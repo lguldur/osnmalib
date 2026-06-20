@@ -13,27 +13,28 @@ enum class AuthState : int32_t
 
 enum class AuthReason : int32_t
 {
+    /* Stable values: these integers are part of the Pegasus CSV format. */
     None = 0,
-    NotInitialized,
-    InvalidPrn,
-    InvalidTime,
-    InvalidFrameFormat,
-    NoOsnmaData,
-    WaitingForMoreFrames,
-    WaitingForKey,
-    IncompleteDsm,
-    MissingNavData,
-    AuthenticationExpired,
-    StaleData,
-    TimeInconsistency,
-    MerkleVerificationFailed,
-    PublicKeyVerificationFailed,
-    SignatureVerificationFailed,
-    TeslaChainVerificationFailed,
-    MackVerificationFailed,
-    BufferOverflow,
-    UnsupportedMessage,
-    InternalError
+    NotInitialized = 1,
+    InvalidPrn = 2,
+    InvalidTime = 3,
+    InvalidFrameFormat = 4,
+    NoOsnmaData = 5,
+    WaitingForMoreFrames = 6,
+    WaitingForKey = 7,
+    IncompleteDsm = 8,
+    MissingNavData = 9,
+    AuthenticationExpired = 10,
+    StaleData = 11,
+    TimeInconsistency = 12,
+    MerkleVerificationFailed = 13,
+    PublicKeyVerificationFailed = 14,
+    SignatureVerificationFailed = 15,
+    TeslaChainVerificationFailed = 16,
+    MackVerificationFailed = 17,
+    BufferOverflow = 18,
+    UnsupportedMessage = 19,
+    InternalError = 20
 };
 
 
