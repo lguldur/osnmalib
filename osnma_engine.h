@@ -39,6 +39,11 @@ public:
 
         std::int64_t subframes_processed = 0;
 
+        // Complete 15-page OSNMA fields with HKROOT=0 and MACK=0.
+        // This is the normal indication that the satellite does not
+        // transmit OSNMA in that subframe.
+        std::int64_t subframes_without_osnma = 0;
+
         std::int64_t dsm_blocks_received = 0;
         std::int64_t dsm_messages_completed = 0;
         std::int64_t dsm_decode_ok = 0;
@@ -77,6 +82,7 @@ public:
 
         std::int64_t mack_parse_ok = 0;
         std::int64_t mack_parse_failed = 0;
+        std::int64_t all_zero_macks_rejected = 0;
         std::int64_t macks_added_pending = 0;
 
         std::int64_t pending_macks_overwritten = 0;

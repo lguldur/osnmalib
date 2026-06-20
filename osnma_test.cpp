@@ -1460,6 +1460,8 @@ static void PrintOsnmaEngineStatistics(const OsnmaEngine::Statistics& s)
 
     printf("  subframes_processed=%lld\n",
            static_cast<long long>(s.subframes_processed));
+    printf("  subframes_without_osnma=%lld\n",
+           static_cast<long long>(s.subframes_without_osnma));
 
     printf("\nDSM:\n");
     printf("  dsm_blocks_received=%lld\n",
@@ -1520,9 +1522,10 @@ static void PrintOsnmaEngineStatistics(const OsnmaEngine::Statistics& s)
            static_cast<long long>(s.subframes_waiting_for_kroot));
 
     printf("\nMACK/pending verification:\n");
-    printf("  mack_parse_ok=%lld mack_parse_failed=%lld\n",
+    printf("  mack_parse_ok=%lld mack_parse_failed=%lld all_zero_macks_rejected=%lld\n",
            static_cast<long long>(s.mack_parse_ok),
-           static_cast<long long>(s.mack_parse_failed));
+           static_cast<long long>(s.mack_parse_failed),
+           static_cast<long long>(s.all_zero_macks_rejected));
     printf("  macks_added_pending=%lld\n",
            static_cast<long long>(s.macks_added_pending));
     printf("  pending_macks_current=%d pending_macks_max_seen=%d\n",

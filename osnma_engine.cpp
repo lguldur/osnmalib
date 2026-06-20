@@ -7,6 +7,36 @@
 #include <cstdio>
 #include <cmath>
 
+namespace
+{
+    template <std::size_t N>
+    bool IsAllZero(const std::array<std::uint8_t, N>& bytes)
+    {
+        for (const std::uint8_t value : bytes)
+        {
+            if (value != 0u)
+                return false;
+        }
+
+        return true;
+    }
+
+    bool IsOsnmaNotTransmitted(const OsnmaSubframe& subframe)
+    {
+        /*
+            When a satellite does not transmit OSNMA, all 40 OSNMA bits
+            of every page are zero.  Once the 15 pages are assembled this
+            is represented by both the complete HKROOT and MACK arrays
+            being zero.
+
+            Do not classify an all-zero MACK alone as this condition: a
+            non-zero HKROOT with an all-zero MACK is inconsistent and must
+            continue through the normal validation/error path.
+        */
+        return IsAllZero(subframe.hkroot) && IsAllZero(subframe.mack);
+    }
+}
+
 void OsnmaEngine::Reset()
 {
     dsm_assembler_.Reset();
@@ -219,6 +249,22 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
 
     nav_candidate_store_.Cleanup(subframe.subframe_epoch);
     CleanupPendingMacks(subframe.subframe_epoch);
+
+    /*
+        A complete all-zero OSNMA field is the protocol-defined indication
+        that this satellite is not transmitting OSNMA.  It is a normal
+        operating condition, not a malformed MACK and not a TESLA-key
+        verification failure.  No diagnostic log row is generated.
+    */
+    if (IsOsnmaNotTransmitted(subframe))
+    {
+        ++statistics_.subframes_without_osnma;
+
+        return MakePendingResult(subframe,
+            source,
+            raw_source,
+            AuthReason::NoOsnmaData);
+    }
 
     /*
         DSM and MACK processing are deliberately independent.
@@ -474,6 +520,31 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
                 }
             }
         }
+    }
+
+    /*
+        An all-zero MACK is only the normal "OSNMA not transmitted" case
+        when HKROOT is also entirely zero (handled above).  With a non-zero
+        HKROOT it is an inconsistent/incomplete OSNMA subframe.  Report it
+        as MACK validation, without attempting TESLA-key verification.
+    */
+    if (IsAllZero(subframe.mack))
+    {
+        ++statistics_.all_zero_macks_rejected;
+
+        LogEvent(PegasusLogEvent::MackValidationFailed,
+            PegasusLogSeverity::Warning,
+            subframe.subframe_epoch,
+            subframe.prn,
+            AuthReason::InvalidFrameFormat,
+            source,
+            raw_source,
+            "MACK is all zero while HKROOT is non-zero");
+
+        return MakePendingResult(subframe,
+            source,
+            raw_source,
+            AuthReason::InvalidFrameFormat);
     }
 
     const OsnmaDsmKroot* trusted_kroot =

@@ -11,6 +11,7 @@
 #include "osnma_mac_input.h"
 #include "osnma_mac_verifier.h"
 #include "osnma_mack.h"
+#include "osnma_engine.h"
 #include "osnma_tesla_chain.h"
 
 namespace
@@ -812,6 +813,8 @@ OsnmaSelfTest::Result OsnmaSelfTest::RunAll()
     TestAuthenticatedTimingDecode(result);
     TestPegasusRowMapping(result);
     TestCedCompletionEpochPreserved(result);
+    TestAllZeroOsnmaSubframeIsNormal(result);
+    TestAllZeroMackWithNonZeroHkrootIsRejected(result);
 
     return result;
 }
@@ -1501,6 +1504,109 @@ bool OsnmaSelfTest::TestCedCompletionEpochPreserved(Result& result)
         candidate->has_ced_complete_time &&
         candidate->ced_complete_time.tow == 64.0,
         "Changed CED did not acquire a new completion epoch");
+}
+
+
+bool OsnmaSelfTest::TestAllZeroOsnmaSubframeIsNormal(Result& result)
+{
+    ++result.test_count;
+
+    OsnmaEngine engine{};
+
+    OsnmaSubframe subframe{};
+    subframe.prn = 4;
+    subframe.subframe_epoch = GnssTime{1234, 345600.0};
+
+    const GnssTime reception_time{1234, 345628.0};
+
+    const OsnmaEngine::Result process_result =
+        engine.ProcessSubframe(subframe,
+            reception_time,
+            NavSignalSource::Freq1,
+            1);
+
+    const OsnmaEngine::Statistics& statistics =
+        engine.GetStatistics();
+
+    if (!Check(result,
+        process_result.state == AuthState::Unknown &&
+        process_result.reason == AuthReason::NoOsnmaData,
+        "All-zero OSNMA subframe was not classified as NoOsnmaData"))
+    {
+        return false;
+    }
+
+    if (!Check(result,
+        statistics.subframes_processed == 1 &&
+        statistics.subframes_without_osnma == 1 &&
+        statistics.dsm_blocks_received == 0 &&
+        statistics.mack_parse_ok == 0 &&
+        statistics.mack_parse_failed == 0 &&
+        statistics.macks_added_pending == 0 &&
+        statistics.disclosed_keys_failed == 0,
+        "All-zero OSNMA subframe entered DSM/MACK/TESLA processing"))
+    {
+        return false;
+    }
+
+    return Check(result,
+        engine.PegasusLogRowCount() == 0,
+        "All-zero OSNMA subframe generated an exceptional log row");
+}
+
+bool OsnmaSelfTest::TestAllZeroMackWithNonZeroHkrootIsRejected(
+    Result& result)
+{
+    ++result.test_count;
+
+    OsnmaEngine engine{};
+
+    OsnmaSubframe subframe{};
+    subframe.prn = 4;
+    subframe.subframe_epoch = GnssTime{1234, 345600.0};
+    subframe.hkroot[0] = 0x40u;
+
+    const OsnmaEngine::Result process_result =
+        engine.ProcessSubframe(subframe,
+            GnssTime{1234, 345628.0},
+            NavSignalSource::Freq1,
+            1);
+
+    const OsnmaEngine::Statistics& statistics =
+        engine.GetStatistics();
+
+    if (!Check(result,
+        process_result.state == AuthState::Unknown &&
+        process_result.reason == AuthReason::InvalidFrameFormat,
+        "All-zero MACK with non-zero HKROOT was not rejected"))
+    {
+        return false;
+    }
+
+    if (!Check(result,
+        statistics.subframes_without_osnma == 0 &&
+        statistics.all_zero_macks_rejected == 1 &&
+        statistics.macks_added_pending == 0 &&
+        statistics.disclosed_keys_failed == 0,
+        "Inconsistent all-zero MACK entered TESLA processing"))
+    {
+        return false;
+    }
+
+    PegasusLogRow log{};
+    if (!Check(result,
+        engine.PopPegasusLogRow(log),
+        "Inconsistent all-zero MACK did not generate a diagnostic row"))
+    {
+        return false;
+    }
+
+    return Check(result,
+        log.event == PegasusLogEvent::MackValidationFailed &&
+        log.auth_reason.has_value() &&
+        log.auth_reason.value() == AuthReason::InvalidFrameFormat &&
+        engine.PegasusLogRowCount() == 0,
+        "Inconsistent all-zero MACK diagnostic classification failed");
 }
 
 void OsnmaSelfTest::Fail(Result& result,
