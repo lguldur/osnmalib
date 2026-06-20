@@ -156,6 +156,10 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="osnma_test.cpp" />
+    <ClCompile Include="pegasus_csv_writer.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="pegasus_csv_writer.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\mbedtls\build-vs\library\mbedcrypto.vcxproj">

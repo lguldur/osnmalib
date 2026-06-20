@@ -15,6 +15,7 @@
 #include "osnma_official_test_vector_reader.h"
 #include "osnma_xml_material_loader.h"
 #include "osnma_self_test.h"
+#include "pegasus_csv_writer.h"
 
 // -tv "D:\data\osnma\Test_vectors" > d:\data\osnma\out.txt
 // -tv "D:\data\osnma\Test_vectors" configuration_1 16_AUG_2023_GST_05_00_01.csv > d:\data\osnma\out.txt
@@ -23,6 +24,7 @@
 // -json D:\data\osnma\week_1397_24h.jsonl D:\data\osnma\OSNMA_MerkleTree_20251210100000_newPKID_2.xml D:\data\osnma\OSNMA_PublicKey_20251210100000_newPKID_2.xml --print-nav > d:\data\osnma\jsonout_nav.txt
 // -json D:\data\osnma\week_1397_24h.jsonl D:\data\osnma\OSNMA_MerkleTree_20251210100000_newPKID_2.xml D:\data\osnma\OSNMA_PublicKey_20251210100000_newPKID_2.xml --rinex-prefix D:\data\osnma\week_1397
 // -json D:\data\osnma\week_1397_24h.jsonl D:\data\osnma\OSNMA_MerkleTree_20251210100000_newPKID_2.xml D:\data\osnma\OSNMA_PublicKey_20251210100000_newPKID_2.xml --rinex4-prefix D:\data\osnma\week_1397
+// -json D:\data\osnma\week_1397_24h.jsonl D:\data\osnma\OSNMA_MerkleTree_20251210100000_newPKID_2.xml D:\data\osnma\OSNMA_PublicKey_20251210100000_newPKID_2.xml --pegasus-prefix D:\data\osnma\week_1397
 
 namespace
 {
@@ -1321,12 +1323,15 @@ static void PrintUsage(const char* exe_name)
     printf("          Writes a dedicated RINEX 3.05 file named <prefix>_osnma_nav.rnx.\n");
     printf("      --rinex4-prefix <prefix>\n");
     printf("          Writes a dedicated RINEX 4.02 file named <prefix>_osnma_nav4.rnx.\n");
+    printf("      --pegasus-prefix <prefix>\n");
+    printf("          Writes <prefix>_E_INAV.eph/.iono/.dtime/.log.\n");
     printf("\n");
     printf("Examples:\n");
     printf("  %s -tv \"D:\\data\\osnma\\Test_vectors\"\n", exe);
     printf("  %s -json week_1397_24h.jsonl OSNMA_MerkleTree_20251210100000_newPKID_2.xml OSNMA_PublicKey_20251210100000_newPKID_2.xml --print-nav\n", exe);
     printf("  %s -json week_1397_24h.jsonl OSNMA_MerkleTree_20251210100000_newPKID_2.xml OSNMA_PublicKey_20251210100000_newPKID_2.xml --rinex-prefix D:\\data\\osnma\\week_1397\n", exe);
     printf("  %s -json week_1397_24h.jsonl OSNMA_MerkleTree_20251210100000_newPKID_2.xml OSNMA_PublicKey_20251210100000_newPKID_2.xml --rinex4-prefix D:\\data\\osnma\\week_1397\n", exe);
+    printf("  %s -json week_1397_24h.jsonl OSNMA_MerkleTree_20251210100000_newPKID_2.xml OSNMA_PublicKey_20251210100000_newPKID_2.xml --pegasus-prefix D:\\data\\osnma\\week_1397\n", exe);
 }
 
 static void PrintXmlMaterialStats(const OsnmaXmlMaterialLoader::Stats& s)
@@ -1659,7 +1664,8 @@ static int RunJsonMode(const char* jsonl_filename,
     const char* public_key_xml,
     bool print_navigation,
     const char* rinex_prefix,
-    const char* rinex4_prefix)
+    const char* rinex4_prefix,
+    const char* pegasus_prefix)
 {
     if (jsonl_filename == nullptr || jsonl_filename[0] == '\0' ||
         merkle_tree_xml == nullptr || merkle_tree_xml[0] == '\0' ||
@@ -1780,6 +1786,34 @@ static int RunJsonMode(const char* jsonl_filename,
             PrintAuthenticatedNavigationDump(records);
     }
 
+    if (pegasus_prefix != nullptr && pegasus_prefix[0] != '\0')
+    {
+        PegasusCsvWriter::Result pegasus_result{};
+        if (!PegasusCsvWriter::Write(pegasus_prefix,
+            auth,
+            reader_stats,
+            pegasus_result))
+        {
+            printf("Failed to write Pegasus files for prefix: %s\n",
+                pegasus_prefix);
+            return 1;
+        }
+
+        printf("\nPegasus navigation output:\n");
+        printf("  eph=%s rows=%d\n",
+            pegasus_result.eph_filename.c_str(),
+            pegasus_result.eph_rows);
+        printf("  iono=%s rows=%d\n",
+            pegasus_result.iono_filename.c_str(),
+            pegasus_result.iono_rows);
+        printf("  dtime=%s rows=%d\n",
+            pegasus_result.dtime_filename.c_str(),
+            pegasus_result.dtime_rows);
+        printf("  log=%s rows=%d\n",
+            pegasus_result.log_filename.c_str(),
+            pegasus_result.log_rows);
+    }
+
     printf("Done.\n");
     return 0;
 }
@@ -1828,6 +1862,7 @@ int main(int argc, char** argv)
         bool print_navigation = false;
         const char* rinex_prefix = nullptr;
         const char* rinex4_prefix = nullptr;
+        const char* pegasus_prefix = nullptr;
 
         for (int32_t arg_index = 5; arg_index < argc; ++arg_index)
         {
@@ -1875,6 +1910,25 @@ int main(int argc, char** argv)
                 continue;
             }
 
+            if (std::strcmp(argv[arg_index], "--pegasus-prefix") == 0)
+            {
+                if (arg_index + 1 >= argc)
+                {
+                    printf("Missing value after --pegasus-prefix.\n\n");
+                    PrintUsage(argv[0]);
+                    return 1;
+                }
+
+                pegasus_prefix = argv[++arg_index];
+                if (pegasus_prefix[0] == '\0')
+                {
+                    printf("Empty --pegasus-prefix value.\n\n");
+                    PrintUsage(argv[0]);
+                    return 1;
+                }
+                continue;
+            }
+
             printf("Unknown -json option: %s\n\n", argv[arg_index]);
             PrintUsage(argv[0]);
             return 1;
@@ -1883,7 +1937,8 @@ int main(int argc, char** argv)
         return RunJsonMode(argv[2], argv[3], argv[4],
             print_navigation,
             rinex_prefix,
-            rinex4_prefix);
+            rinex4_prefix,
+            pegasus_prefix);
     }
 
     printf("Unknown option: %s\n\n", argv[1]);

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <deque>
 #include <limits>
+#include <optional>
 
 #include "GALDataStructures.h"
 #include "galileo_nav_candidate.h"
@@ -12,6 +13,7 @@
 #include "osnma_mack.h"
 #include "osnma_types.h"
 #include "pegasus_nav_rows.h"
+#include "pegasus_log_rows.h"
 
 /*
     One authenticated ADKD=0/12 CED/status object.
@@ -169,6 +171,21 @@ public:
         const GalileoAuthenticatedTiming& data,
         PegasusDtimeRow* out_rows,
         int32_t max_rows);
+
+    static bool MakeReceivedPegasusEphRow(
+        const GalileoNavCandidate& candidate,
+        NavSignalSource source,
+        int32_t raw_source,
+        PegasusEphRow& out);
+
+    static bool MakeReceivedPegasusIonoRow(
+        const GalileoNavCandidate& candidate,
+        PegasusIonoRow& out);
+
+    static bool MakeReceivedPegasusDtimeRow(
+        const GalileoNavCandidate& candidate,
+        int32_t wt,
+        PegasusDtimeRow& out);
 };
 
 class GalileoAuthDataFifo
@@ -197,6 +214,14 @@ public:
     int32_t PegasusIonoRowCount() const;
     int32_t PegasusDtimeRowCount() const;
 
+    void ObserveNavigation(const GalileoNavFeedObservation& observation,
+        NavSignalSource source,
+        int32_t raw_source);
+
+    void PushLog(const PegasusLogRow& row);
+    bool PopPegasusLogRow(PegasusLogRow& row);
+    int32_t PegasusLogRowCount() const;
+
     /*
         Legacy standalone queues retained for source compatibility. They are
         not populated automatically by OsnmaEngine; new code should consume
@@ -222,6 +247,15 @@ private:
     std::deque<PegasusEphRow> pegasus_eph_rows_;
     std::deque<PegasusIonoRow> pegasus_iono_rows_;
     std::deque<PegasusDtimeRow> pegasus_dtime_rows_;
+    std::deque<PegasusLogRow> pegasus_log_rows_;
+
+    static constexpr int32_t PEGASUS_MAX_PRN = 256;
+    std::array<std::optional<std::uint64_t>, PEGASUS_MAX_PRN> last_rx_eph_{};
+    std::array<std::optional<std::uint64_t>, PEGASUS_MAX_PRN> last_rx_iono_{};
+    std::array<std::array<std::optional<std::uint64_t>, 2>, PEGASUS_MAX_PRN> last_rx_dtime_{};
+    std::array<std::optional<std::uint64_t>, PEGASUS_MAX_PRN> last_auth_eph_{};
+    std::array<std::optional<std::uint64_t>, PEGASUS_MAX_PRN> last_auth_iono_{};
+    std::array<std::array<std::optional<std::uint64_t>, 2>, PEGASUS_MAX_PRN> last_auth_dtime_{};
 
     std::deque<AuthEphRecord> eph_;
     std::deque<AuthIonoRecord> iono_;

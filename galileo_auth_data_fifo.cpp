@@ -133,6 +133,113 @@ namespace
 
         return value == mask;
     }
+
+    constexpr std::uint64_t FNV_OFFSET = 14695981039346656037ull;
+    constexpr std::uint64_t FNV_PRIME = 1099511628211ull;
+
+    void HashByte(std::uint64_t& hash, std::uint8_t value)
+    {
+        hash ^= value;
+        hash *= FNV_PRIME;
+    }
+
+    void HashInt32(std::uint64_t& hash, int32_t value)
+    {
+        const std::uint32_t v = static_cast<std::uint32_t>(value);
+        HashByte(hash, static_cast<std::uint8_t>((v >> 24) & 0xFFu));
+        HashByte(hash, static_cast<std::uint8_t>((v >> 16) & 0xFFu));
+        HashByte(hash, static_cast<std::uint8_t>((v >> 8) & 0xFFu));
+        HashByte(hash, static_cast<std::uint8_t>(v & 0xFFu));
+    }
+
+    void HashBits(std::uint64_t& hash,
+        const std::uint8_t* data,
+        int32_t first_bit,
+        int32_t bit_count)
+    {
+        if (data == nullptr || first_bit < 0 || bit_count <= 0)
+            return;
+
+        std::uint8_t packed = 0;
+        int32_t packed_bits = 0;
+
+        for (int32_t i = 0; i < bit_count; ++i)
+        {
+            packed = static_cast<std::uint8_t>(packed << 1);
+            if (GetBitMsb0(data, first_bit + i))
+                packed = static_cast<std::uint8_t>(packed | 1u);
+
+            ++packed_bits;
+            if (packed_bits == 8)
+            {
+                HashByte(hash, packed);
+                packed = 0;
+                packed_bits = 0;
+            }
+        }
+
+        if (packed_bits != 0)
+        {
+            packed = static_cast<std::uint8_t>(packed << (8 - packed_bits));
+            HashByte(hash, packed);
+        }
+    }
+
+    std::uint64_t EphFingerprint(const std::uint8_t* wt1,
+        const std::uint8_t* wt2,
+        const std::uint8_t* wt3,
+        const std::uint8_t* wt4,
+        const std::uint8_t* wt5,
+        int32_t prn)
+    {
+        std::uint64_t hash = FNV_OFFSET;
+        HashInt32(hash, prn);
+        HashBits(hash, wt1, 0, 128);
+        HashBits(hash, wt2, 0, 128);
+        HashBits(hash, wt3, 0, 128);
+        HashBits(hash, wt4, 0, 128);
+        // Only WT5 fields represented in .eph: BGD and health/DVS.
+        HashBits(hash, wt5, 47, 26);
+        return hash;
+    }
+
+    std::uint64_t IonoFingerprint(const std::uint8_t* wt5,
+        int32_t prn)
+    {
+        std::uint64_t hash = FNV_OFFSET;
+        HashInt32(hash, prn);
+        // NeQuick-G coefficients and five regional disturbance flags.
+        HashBits(hash, wt5, 6, 41);
+        return hash;
+    }
+
+    std::uint64_t DtimeFingerprint(const std::uint8_t* word,
+        int32_t wt,
+        int32_t prn)
+    {
+        std::uint64_t hash = FNV_OFFSET;
+        HashInt32(hash, prn);
+        HashInt32(hash, wt);
+
+        if (wt == GAL_WT6)
+        {
+            // GST-UTC A0/A1 plus T0/WN0. Leap-second fields are excluded.
+            HashBits(hash, word, 6, 56);
+            HashBits(hash, word, 70, 16);
+        }
+        else if (wt == GAL_WT10)
+        {
+            // GGTO A0G/A1G/T0G/WN0G.
+            HashBits(hash, word, 86, 42);
+        }
+
+        return hash;
+    }
+
+    bool ValidPegasusPrn(int32_t prn)
+    {
+        return prn > 0 && prn < 256;
+    }
 }
 
 AuthEphRecord::AuthEphRecord()
@@ -550,7 +657,13 @@ bool GalileoInavDecoder::MakePegasusEphRow(
     out.auth_tom = data.authentication_time.tow;
     out.auth_adkd = data.authentication_adkd;
     out.auth_bits = data.auth_bits;
-    out.nav_fingerprint = data.nav_fingerprint;
+    out.nav_fingerprint = EphFingerprint(
+        data.raw_words[0].data(),
+        data.raw_words[1].data(),
+        data.raw_words[2].data(),
+        data.raw_words[3].data(),
+        data.raw_words[4].data(),
+        data.prn);
 
     out.toc_week = gps_week(static_cast<int32_t>(eph.WNToc));
     out.toc_tom = static_cast<double>(eph.Toc);
@@ -579,17 +692,7 @@ bool GalileoInavDecoder::MakePegasusEphRow(
     out.i_dot = eph.IDot;
 
     out.data_sources = static_cast<std::uint32_t>(eph.DataSources);
-
-    if (data.sisa <= 49u)
-        out.sisa = static_cast<double>(data.sisa) * 0.01;
-    else if (data.sisa <= 74u)
-        out.sisa = 0.50 + static_cast<double>(data.sisa - 50u) * 0.02;
-    else if (data.sisa <= 99u)
-        out.sisa = 1.00 + static_cast<double>(data.sisa - 75u) * 0.04;
-    else if (data.sisa <= 125u)
-        out.sisa = 2.00 + static_cast<double>(data.sisa - 100u) * 0.16;
-    else
-        out.sisa = -1.0;
+    out.sisa = static_cast<std::uint32_t>(data.sisa);
 
     out.sv_health = static_cast<std::uint32_t>(eph.SVHealth);
     out.bgd_e5a_e1 = eph.BGD_L1E5a;
@@ -625,7 +728,9 @@ bool GalileoInavDecoder::MakePegasusIonoRow(
     out.auth_tom = data.authentication_time.tow;
     out.auth_adkd = data.authentication_adkd;
     out.auth_bits = data.auth_bits;
-    out.nav_fingerprint = data.nav_fingerprint;
+    out.nav_fingerprint = IonoFingerprint(
+        data.raw_words[4].data(),
+        data.prn);
 
     out.ai0 = data.ionosphere.ai0;
     out.ai1 = data.ionosphere.ai1;
@@ -668,12 +773,13 @@ int32_t GalileoInavDecoder::MakePegasusDtimeRows(
         out.auth_tom = data.authentication_time.tow;
         out.auth_adkd = data.authentication_adkd;
         out.auth_bits = data.auth_bits;
-        out.nav_fingerprint = data.nav_fingerprint;
+        out.nav_fingerprint = DtimeFingerprint(
+            data.raw_wt6.data(), GAL_WT6, data.prn);
 
         out.target_time_system = PegasusTimeSystem::Utc;
         out.a0 = data.utc.a0;
         out.a1 = data.utc.a1;
-        out.a2 = 0.0;
+        out.a2.reset();
         out.reference_week = gps_week(data.utc.WN0_UTC);
         out.reference_tom = static_cast<double>(data.utc.T0_UTC);
         out.tx_week = gps_week(data.wt6_page_time.wn);
@@ -695,12 +801,13 @@ int32_t GalileoInavDecoder::MakePegasusDtimeRows(
         out.auth_tom = data.authentication_time.tow;
         out.auth_adkd = data.authentication_adkd;
         out.auth_bits = data.auth_bits;
-        out.nav_fingerprint = data.nav_fingerprint;
+        out.nav_fingerprint = DtimeFingerprint(
+            data.raw_wt10.data(), GAL_WT10, data.prn);
 
         out.target_time_system = PegasusTimeSystem::Gps;
         out.a0 = data.a0g;
         out.a1 = data.a1g;
-        out.a2 = 0.0;
+        out.a2.reset();
         out.reference_week = gps_week(data.wn0g);
         out.reference_tom = static_cast<double>(data.t0g);
         out.tx_week = gps_week(data.wt10_page_time.wn);
@@ -710,6 +817,148 @@ int32_t GalileoInavDecoder::MakePegasusDtimeRows(
     return count;
 }
 
+bool GalileoInavDecoder::MakeReceivedPegasusEphRow(
+    const GalileoNavCandidate& candidate,
+    NavSignalSource source,
+    int32_t raw_source,
+    PegasusEphRow& out)
+{
+    if (!candidate.HasCedData() || !candidate.has_ced_complete_time)
+        return false;
+
+    GalileoAuthenticatedCedStatus decoded{};
+    const GnssTime no_auth_time{};
+
+    if (!DecodeCedStatus(candidate,
+        candidate.ced_complete_time,
+        no_auth_time,
+        0,
+        0,
+        source,
+        raw_source,
+        decoded))
+    {
+        return false;
+    }
+
+    if (!MakePegasusEphRow(decoded, out))
+        return false;
+
+    out.auth_status = AuthState::Unknown;
+    out.auth_reason = AuthReason::WaitingForAuthentication;
+    out.auth_week = PEGASUS_INVALID_WEEK;
+    out.auth_tom = PEGASUS_INVALID_TOM;
+    out.auth_adkd.reset();
+    out.auth_bits = 0;
+    return true;
+}
+
+bool GalileoInavDecoder::MakeReceivedPegasusIonoRow(
+    const GalileoNavCandidate& candidate,
+    PegasusIonoRow& out)
+{
+    out = PegasusIonoRow{};
+
+    if (!candidate.HasWord(GAL_WT5) || candidate.prn <= 0)
+        return false;
+
+    const GalileoNavWord& word = candidate.words[GAL_WT5];
+    if (!word.has_epoch || !IsTimeValid(word.page_epoch))
+        return false;
+
+    const std::uint8_t* wt5 = word.even.data();
+    out.rx_week = word.page_epoch.wn + GALILEO_GST_TO_GPS_WEEK_OFFSET;
+    out.rx_tom = word.page_epoch.tow;
+    out.prn = candidate.prn;
+    out.auth_status = AuthState::Unknown;
+    out.auth_reason = AuthReason::WaitingForAuthentication;
+    out.auth_adkd.reset();
+    out.auth_bits = 0;
+    out.nav_fingerprint = IonoFingerprint(wt5, candidate.prn);
+    out.ai0 = ScaleUnsigned(wt5, 6, 11, -2);
+    out.ai1 = ScaleSigned(wt5, 17, 11, -8);
+    out.ai2 = ScaleSigned(wt5, 28, 14, -15);
+
+    std::uint8_t storm_flags = 0;
+    for (int32_t i = 0; i < 5; ++i)
+    {
+        if (GetBitMsb0(wt5, 42 + i))
+            storm_flags = static_cast<std::uint8_t>(storm_flags | (1u << i));
+    }
+    out.storm_flags = storm_flags;
+    out.tx_week = out.rx_week;
+    out.tx_tom = out.rx_tom;
+    return true;
+}
+
+bool GalileoInavDecoder::MakeReceivedPegasusDtimeRow(
+    const GalileoNavCandidate& candidate,
+    int32_t wt,
+    PegasusDtimeRow& out)
+{
+    out = PegasusDtimeRow{};
+
+    if ((wt != GAL_WT6 && wt != GAL_WT10) ||
+        !candidate.HasWord(wt) || candidate.prn <= 0)
+    {
+        return false;
+    }
+
+    const GalileoNavWord& word = candidate.words[wt];
+    if (!word.has_epoch || !IsTimeValid(word.page_epoch))
+        return false;
+
+    const std::uint8_t* raw = word.even.data();
+    out.rx_week = word.page_epoch.wn + GALILEO_GST_TO_GPS_WEEK_OFFSET;
+    out.rx_tom = word.page_epoch.tow;
+    out.prn = candidate.prn;
+    out.auth_status = AuthState::Unknown;
+    out.auth_reason = AuthReason::WaitingForAuthentication;
+    out.auth_adkd.reset();
+    out.auth_bits = 0;
+    out.nav_fingerprint = DtimeFingerprint(raw, wt, candidate.prn);
+    out.a2.reset();
+    out.tx_week = out.rx_week;
+    out.tx_tom = out.rx_tom;
+
+    if (wt == GAL_WT6)
+    {
+        out.target_time_system = PegasusTimeSystem::Utc;
+        out.a0 = ScaleSigned(raw, 6, 32, -30);
+        out.a1 = ScaleSigned(raw, 38, 24, -50);
+        out.reference_tom = static_cast<double>(
+            GetUnsignedBits64Msb0(raw, 70, 8) * 3600u);
+        const int32_t gst_week = ResolveTruncatedWeek(
+            word.page_epoch.wn,
+            static_cast<int32_t>(GetUnsignedBits64Msb0(raw, 78, 8)),
+            8);
+        out.reference_week = gst_week + GALILEO_GST_TO_GPS_WEEK_OFFSET;
+        return true;
+    }
+
+    const std::uint64_t raw_a0g = GetUnsignedBits64Msb0(raw, 86, 16);
+    const std::uint64_t raw_a1g = GetUnsignedBits64Msb0(raw, 102, 12);
+    const std::uint64_t raw_t0g = GetUnsignedBits64Msb0(raw, 114, 8);
+    const std::uint64_t raw_wn0g = GetUnsignedBits64Msb0(raw, 122, 6);
+
+    if (IsAllOnes(raw_a0g, 16) && IsAllOnes(raw_a1g, 12) &&
+        IsAllOnes(raw_t0g, 8) && IsAllOnes(raw_wn0g, 6))
+    {
+        return false;
+    }
+
+    out.target_time_system = PegasusTimeSystem::Gps;
+    out.a0 = ScaleSigned(raw, 86, 16, -35);
+    out.a1 = ScaleSigned(raw, 102, 12, -51);
+    out.reference_tom = static_cast<double>(raw_t0g * 3600u);
+    const int32_t gst_week = ResolveTruncatedWeek(
+        word.page_epoch.wn,
+        static_cast<int32_t>(raw_wn0g),
+        6);
+    out.reference_week = gst_week + GALILEO_GST_TO_GPS_WEEK_OFFSET;
+    return true;
+}
+
 void GalileoAuthDataFifo::Reset()
 {
     ced_status_.clear();
@@ -717,6 +966,13 @@ void GalileoAuthDataFifo::Reset()
     pegasus_eph_rows_.clear();
     pegasus_iono_rows_.clear();
     pegasus_dtime_rows_.clear();
+    pegasus_log_rows_.clear();
+    last_rx_eph_.fill(std::nullopt);
+    last_rx_iono_.fill(std::nullopt);
+    last_auth_eph_.fill(std::nullopt);
+    last_auth_iono_.fill(std::nullopt);
+    for (auto& row : last_rx_dtime_) row.fill(std::nullopt);
+    for (auto& row : last_auth_dtime_) row.fill(std::nullopt);
     eph_.clear();
     iono_.clear();
     time_.clear();
@@ -727,13 +983,28 @@ void GalileoAuthDataFifo::PushCedStatus(
 {
     ced_status_.push_back(data);
 
+    if (!ValidPegasusPrn(data.prn))
+        return;
+
+    const std::size_t prn = static_cast<std::size_t>(data.prn);
+
     PegasusEphRow eph_row{};
-    if (GalileoInavDecoder::MakePegasusEphRow(data, eph_row))
+    if (GalileoInavDecoder::MakePegasusEphRow(data, eph_row) &&
+        (!last_auth_eph_[prn].has_value() ||
+         *last_auth_eph_[prn] != eph_row.nav_fingerprint))
+    {
         pegasus_eph_rows_.push_back(eph_row);
+        last_auth_eph_[prn] = eph_row.nav_fingerprint;
+    }
 
     PegasusIonoRow iono_row{};
-    if (GalileoInavDecoder::MakePegasusIonoRow(data, iono_row))
+    if (GalileoInavDecoder::MakePegasusIonoRow(data, iono_row) &&
+        (!last_auth_iono_[prn].has_value() ||
+         *last_auth_iono_[prn] != iono_row.nav_fingerprint))
+    {
         pegasus_iono_rows_.push_back(iono_row);
+        last_auth_iono_[prn] = iono_row.nav_fingerprint;
+    }
 }
 
 void GalileoAuthDataFifo::PushTiming(
@@ -741,6 +1012,10 @@ void GalileoAuthDataFifo::PushTiming(
 {
     timing_.push_back(data);
 
+    if (!ValidPegasusPrn(data.prn))
+        return;
+
+    const std::size_t prn = static_cast<std::size_t>(data.prn);
     std::array<PegasusDtimeRow, 2> rows{};
     const int32_t row_count =
         GalileoInavDecoder::MakePegasusDtimeRows(
@@ -749,7 +1024,83 @@ void GalileoAuthDataFifo::PushTiming(
             static_cast<int32_t>(rows.size()));
 
     for (int32_t i = 0; i < row_count; ++i)
-        pegasus_dtime_rows_.push_back(rows[static_cast<std::size_t>(i)]);
+    {
+        const PegasusDtimeRow& row = rows[static_cast<std::size_t>(i)];
+        const std::size_t target =
+            row.target_time_system == PegasusTimeSystem::Utc ? 0u : 1u;
+
+        if (!last_auth_dtime_[prn][target].has_value() ||
+            *last_auth_dtime_[prn][target] != row.nav_fingerprint)
+        {
+            pegasus_dtime_rows_.push_back(row);
+            last_auth_dtime_[prn][target] = row.nav_fingerprint;
+        }
+    }
+}
+
+void GalileoAuthDataFifo::ObserveNavigation(
+    const GalileoNavFeedObservation& observation,
+    NavSignalSource source,
+    int32_t raw_source)
+{
+    if (!observation.valid || !observation.content_changed ||
+        !ValidPegasusPrn(observation.candidate.prn))
+    {
+        return;
+    }
+
+    const int32_t prn_value = observation.candidate.prn;
+    const std::size_t prn = static_cast<std::size_t>(prn_value);
+
+    if (observation.wt >= GAL_WT1 && observation.wt <= GAL_WT5)
+    {
+        PegasusEphRow eph{};
+        if (GalileoInavDecoder::MakeReceivedPegasusEphRow(
+            observation.candidate, source, raw_source, eph) &&
+            (!last_rx_eph_[prn].has_value() ||
+             *last_rx_eph_[prn] != eph.nav_fingerprint))
+        {
+            pegasus_eph_rows_.push_back(eph);
+            last_rx_eph_[prn] = eph.nav_fingerprint;
+        }
+
+        if (observation.wt == GAL_WT5)
+        {
+            PegasusIonoRow iono{};
+            if (GalileoInavDecoder::MakeReceivedPegasusIonoRow(
+                observation.candidate, iono) &&
+                (!last_rx_iono_[prn].has_value() ||
+                 *last_rx_iono_[prn] != iono.nav_fingerprint))
+            {
+                pegasus_iono_rows_.push_back(iono);
+                last_rx_iono_[prn] = iono.nav_fingerprint;
+            }
+        }
+        return;
+    }
+
+    if (observation.wt == GAL_WT6 || observation.wt == GAL_WT10)
+    {
+        PegasusDtimeRow dtime{};
+        if (!GalileoInavDecoder::MakeReceivedPegasusDtimeRow(
+            observation.candidate, observation.wt, dtime))
+        {
+            return;
+        }
+
+        const std::size_t target = observation.wt == GAL_WT6 ? 0u : 1u;
+        if (!last_rx_dtime_[prn][target].has_value() ||
+            *last_rx_dtime_[prn][target] != dtime.nav_fingerprint)
+        {
+            pegasus_dtime_rows_.push_back(dtime);
+            last_rx_dtime_[prn][target] = dtime.nav_fingerprint;
+        }
+    }
+}
+
+void GalileoAuthDataFifo::PushLog(const PegasusLogRow& row)
+{
+    pegasus_log_rows_.push_back(row);
 }
 
 bool GalileoAuthDataFifo::PopCedStatus(
@@ -828,6 +1179,21 @@ int32_t GalileoAuthDataFifo::PegasusIonoRowCount() const
 int32_t GalileoAuthDataFifo::PegasusDtimeRowCount() const
 {
     return static_cast<int32_t>(pegasus_dtime_rows_.size());
+}
+
+bool GalileoAuthDataFifo::PopPegasusLogRow(PegasusLogRow& row)
+{
+    if (pegasus_log_rows_.empty())
+        return false;
+
+    row = pegasus_log_rows_.front();
+    pegasus_log_rows_.pop_front();
+    return true;
+}
+
+int32_t GalileoAuthDataFifo::PegasusLogRowCount() const
+{
+    return static_cast<int32_t>(pegasus_log_rows_.size());
 }
 
 void GalileoAuthDataFifo::PushEph(const GALEphDecodedType& eph)

@@ -51,6 +51,10 @@ public:
     int32_t PegasusIonoRowCount() const;
     int32_t PegasusDtimeRowCount() const;
 
+    bool PopPegasusLogRow(PegasusLogRow& row);
+    int32_t PegasusLogRowCount() const;
+    void AddPegasusLogRow(const PegasusLogRow& row);
+
     bool SetMerkleRoot(const std::uint8_t* root_32_bytes);
 
     bool AddTrustedPublicKey(const OsnmaDsmPkr& public_key);

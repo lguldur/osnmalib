@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <limits>
+#include <optional>
 
 #include "osnma_mack.h"
 #include "osnma_types.h"
@@ -67,7 +68,7 @@ struct PegasusEphRow
     double auth_tom = PEGASUS_INVALID_TOM;
 
     // "AUTH_ADKD";"AUTH_BITS";"NAV_FINGERPRINT"
-    OsnmaAdkd auth_adkd = OsnmaAdkd::Reserved;
+    std::optional<OsnmaAdkd> auth_adkd{};
     std::int64_t auth_bits = 0;
     std::uint64_t nav_fingerprint = 0;
 
@@ -108,7 +109,7 @@ struct PegasusEphRow
     // Bit fields are written as quoted hexadecimal strings in CSV.
     // "DATA_SOURCES";"SISA";"SV_HEALTH"
     std::uint32_t data_sources = 0;
-    double sisa = -1.0;
+    std::uint32_t sisa = 0; // Raw broadcast SISA index.
     std::uint32_t sv_health = 0;
 
     // "BGD_E5A_E1";"BGD_E5B_E1"
@@ -133,7 +134,7 @@ struct PegasusIonoRow
     AuthReason auth_reason = AuthReason::NotInitialized;
     int32_t auth_week = PEGASUS_INVALID_WEEK;
     double auth_tom = PEGASUS_INVALID_TOM;
-    OsnmaAdkd auth_adkd = OsnmaAdkd::Reserved;
+    std::optional<OsnmaAdkd> auth_adkd{};
     std::int64_t auth_bits = 0;
     std::uint64_t nav_fingerprint = 0;
 
@@ -167,7 +168,7 @@ struct PegasusDtimeRow
     AuthReason auth_reason = AuthReason::NotInitialized;
     int32_t auth_week = PEGASUS_INVALID_WEEK;
     double auth_tom = PEGASUS_INVALID_TOM;
-    OsnmaAdkd auth_adkd = OsnmaAdkd::Reserved;
+    std::optional<OsnmaAdkd> auth_adkd{};
     std::int64_t auth_bits = 0;
     std::uint64_t nav_fingerprint = 0;
 
@@ -175,7 +176,7 @@ struct PegasusDtimeRow
     PegasusTimeSystem target_time_system = PegasusTimeSystem::Utc;
     double a0 = 0.0;
     double a1 = 0.0;
-    double a2 = 0.0;
+    std::optional<double> a2{};
 
     // "REFERENCE_WEEK";"REFERENCE_TOM"
     int32_t reference_week = PEGASUS_INVALID_WEEK;

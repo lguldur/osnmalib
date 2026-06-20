@@ -34,7 +34,8 @@ enum class AuthReason : int32_t
     MackVerificationFailed = 17,
     BufferOverflow = 18,
     UnsupportedMessage = 19,
-    InternalError = 20
+    InternalError = 20,
+    WaitingForAuthentication = 21
 };
 
 

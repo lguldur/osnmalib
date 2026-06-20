@@ -1350,7 +1350,7 @@ bool OsnmaSelfTest::TestPegasusRowMapping(Result& result)
         eph.iodnav == 42 &&
         eph.data_sources == 0x201u &&
         eph.sv_health == 0x142u &&
-        std::fabs(eph.sisa - 0.33) < 1e-15,
+        eph.sisa == 33u,
         "Pegasus eph-row mapping failed"))
     {
         return false;

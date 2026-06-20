@@ -81,6 +81,49 @@ int32_t OsnmaEngine::PegasusDtimeRowCount() const
     return authenticated_nav_data_.PegasusDtimeRowCount();
 }
 
+bool OsnmaEngine::PopPegasusLogRow(PegasusLogRow& row)
+{
+    return authenticated_nav_data_.PopPegasusLogRow(row);
+}
+
+int32_t OsnmaEngine::PegasusLogRowCount() const
+{
+    return authenticated_nav_data_.PegasusLogRowCount();
+}
+
+void OsnmaEngine::AddPegasusLogRow(const PegasusLogRow& row)
+{
+    authenticated_nav_data_.PushLog(row);
+}
+
+void OsnmaEngine::LogEvent(PegasusLogEvent event,
+    PegasusLogSeverity severity,
+    const GnssTime& time,
+    int32_t prn,
+    AuthReason reason,
+    NavSignalSource source,
+    int32_t raw_source,
+    const char* detail)
+{
+    PegasusLogRow row{};
+    if (IsTimeValid(time))
+    {
+        row.rx_week = time.wn + GALILEO_GST_TO_GPS_WEEK_OFFSET;
+        row.rx_tom = time.tow;
+    }
+    if (prn > 0)
+        row.prn = prn;
+    row.severity = severity;
+    row.event = event;
+    if (reason != AuthReason::None)
+        row.auth_reason = reason;
+    row.source = source;
+    row.raw_source = raw_source;
+    if (detail != nullptr)
+        row.detail = detail;
+    authenticated_nav_data_.PushLog(row);
+}
+
 void OsnmaEngine::SetNavTimingMode(NavTimingMode mode)
 {
     nav_candidate_store_.SetNavTimingMode(mode);
@@ -110,7 +153,42 @@ bool OsnmaEngine::FeedNavigationPage(const GalileoInavPageParts& page,
 {
     ++statistics_.navigation_pages_received;
 
-    return nav_candidate_store_.FeedPage(page, reason_out);
+    GalileoNavFeedObservation observation{};
+    const bool accepted =
+        nav_candidate_store_.FeedPage(page, reason_out, &observation);
+
+    if (accepted)
+    {
+        authenticated_nav_data_.ObserveNavigation(observation,
+            page.source,
+            page.native_source_code);
+        return true;
+    }
+
+    if (!page.crc_ok)
+    {
+        LogEvent(PegasusLogEvent::PageCrcFailed,
+            PegasusLogSeverity::Warning,
+            page.page_epoch,
+            page.prn,
+            reason_out,
+            page.source,
+            page.native_source_code,
+            "Navigation page failed CRC");
+    }
+    else if (reason_out != AuthReason::UnsupportedMessage)
+    {
+        LogEvent(PegasusLogEvent::PageRejected,
+            PegasusLogSeverity::Warning,
+            page.page_epoch,
+            page.prn,
+            reason_out,
+            page.source,
+            page.native_source_code,
+            "Navigation page rejected");
+    }
+
+    return false;
 }
 
 OsnmaEngine::Result
@@ -228,6 +306,19 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
                 ++statistics_.dsm_decode_failed_reason_count[reason_index];
             }
 
+            PegasusLogRow log{};
+            log.rx_week = subframe.subframe_epoch.wn + GALILEO_GST_TO_GPS_WEEK_OFFSET;
+            log.rx_tom = subframe.subframe_epoch.tow;
+            log.prn = subframe.prn;
+            log.severity = PegasusLogSeverity::Warning;
+            log.event = PegasusLogEvent::DsmDecodeFailed;
+            log.auth_reason = decode_reason;
+            log.dsm_id = message.dsm_id;
+            log.source = source;
+            log.raw_source = raw_source;
+            log.detail = "Completed DSM message could not be decoded";
+            authenticated_nav_data_.PushLog(log);
+
             register_nonfatal_dsm_failure(decode_reason);
         }
         else
@@ -258,6 +349,19 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
                     {
                         ++statistics_.pkr_failed_reason_count[reason_index];
                     }
+
+                    PegasusLogRow log{};
+                    log.rx_week = subframe.subframe_epoch.wn + GALILEO_GST_TO_GPS_WEEK_OFFSET;
+                    log.rx_tom = subframe.subframe_epoch.tow;
+                    log.prn = subframe.prn;
+                    log.severity = PegasusLogSeverity::Warning;
+                    log.event = PegasusLogEvent::PublicKeyVerificationFailed;
+                    log.auth_reason = pkr_reason;
+                    log.dsm_id = message.dsm_id;
+                    log.source = source;
+                    log.raw_source = raw_source;
+                    log.detail = "DSM-PKR Merkle verification failed";
+                    authenticated_nav_data_.PushLog(log);
 
                     register_nonfatal_dsm_failure(pkr_reason);
                 }
@@ -306,6 +410,19 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
                         ++statistics_.kroot_failed_reason_count[reason_index];
                     }
 
+                    PegasusLogRow log{};
+                    log.rx_week = subframe.subframe_epoch.wn + GALILEO_GST_TO_GPS_WEEK_OFFSET;
+                    log.rx_tom = subframe.subframe_epoch.tow;
+                    log.prn = subframe.prn;
+                    log.severity = PegasusLogSeverity::Warning;
+                    log.event = PegasusLogEvent::KrootVerificationFailed;
+                    log.auth_reason = kroot_reason;
+                    log.dsm_id = message.dsm_id;
+                    log.source = source;
+                    log.raw_source = raw_source;
+                    log.detail = "DSM-KROOT signature verification failed";
+                    authenticated_nav_data_.PushLog(log);
+
                     register_nonfatal_dsm_failure(kroot_reason);
                 }
                 else
@@ -320,6 +437,14 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
                             tesla_reason))
                         {
                             ++statistics_.tesla_init_failed;
+                            LogEvent(PegasusLogEvent::TeslaInitializationFailed,
+                                PegasusLogSeverity::Error,
+                                subframe.subframe_epoch,
+                                subframe.prn,
+                                tesla_reason,
+                                source,
+                                raw_source,
+                                "TESLA chain initialization failed");
                             register_nonfatal_dsm_failure(tesla_reason);
                         }
                         else
@@ -361,6 +486,14 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
     if (!mack_ok)
     {
         ++statistics_.mack_parse_failed;
+        LogEvent(PegasusLogEvent::MackParseFailed,
+            PegasusLogSeverity::Warning,
+            subframe.subframe_epoch,
+            subframe.prn,
+            mack_reason,
+            source,
+            raw_source,
+            "MACK block could not be parsed");
 
         return MakePendingResult(subframe,
             source,
@@ -426,6 +559,14 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
     }
 
     ++statistics_.disclosed_keys_failed;
+    LogEvent(PegasusLogEvent::DisclosedKeyVerificationFailed,
+        PegasusLogSeverity::Warning,
+        subframe.subframe_epoch,
+        subframe.prn,
+        key_result.reason,
+        source,
+        raw_source,
+        "Disclosed TESLA key verification failed");
 
     return MakePendingResult(subframe,
         source,
@@ -464,6 +605,16 @@ void OsnmaEngine::AddPendingMack(const OsnmaMackMessage& mack,
             if (dt < 0.0)
                 slot = i;
         }
+
+        const PendingMack& overwritten = pending_macks_[slot];
+        LogEvent(PegasusLogEvent::PendingMackOverwritten,
+            PegasusLogSeverity::Warning,
+            overwritten.mack.subframe_epoch,
+            overwritten.mack.prn,
+            AuthReason::BufferOverflow,
+            overwritten.source,
+            overwritten.raw_source,
+            "Pending MACK buffer full; oldest entry overwritten");
     }
 
     PendingMack& p = pending_macks_[slot];
@@ -493,6 +644,14 @@ void OsnmaEngine::CleanupPendingMacks(const GnssTime& now)
 
         if (!IsTimeValid(p.mack.subframe_epoch))
         {
+            LogEvent(PegasusLogEvent::PendingMackExpired,
+                PegasusLogSeverity::Warning,
+                now,
+                p.mack.prn,
+                AuthReason::InvalidTime,
+                p.source,
+                p.raw_source,
+                "Pending MACK had an invalid timestamp");
             p = PendingMack{};
             ++statistics_.pending_macks_cleaned;
             continue;
@@ -503,6 +662,14 @@ void OsnmaEngine::CleanupPendingMacks(const GnssTime& now)
 
         if (age_s < 0.0 || age_s > PENDING_MACK_LIFETIME_S)
         {
+            LogEvent(PegasusLogEvent::PendingMackExpired,
+                PegasusLogSeverity::Warning,
+                now,
+                p.mack.prn,
+                AuthReason::AuthenticationExpired,
+                p.source,
+                p.raw_source,
+                "Pending MACK expired before successful processing");
             p = PendingMack{};
             ++statistics_.pending_macks_cleaned;
         }
@@ -765,6 +932,23 @@ OsnmaEngine::ProcessMacksForDisclosedKey(const OsnmaDsmKroot& trusted_kroot,
             ++statistics_.pending_missing_navdata;
             saw_missing_nav = true;
 
+            PegasusLogRow log{};
+            log.rx_week = pending.mack.subframe_epoch.wn + GALILEO_GST_TO_GPS_WEEK_OFFSET;
+            log.rx_tom = pending.mack.subframe_epoch.tow;
+            log.prn = pending.mack.prn;
+            log.severity = PegasusLogSeverity::Warning;
+            log.event = PegasusLogEvent::MissingNavigationData;
+            log.auth_reason = mac_result.reason;
+            log.stage = mac_result.debug_stage;
+            log.tag_index = mac_result.debug_tag_index;
+            log.ctr = mac_result.debug_ctr;
+            if (mac_result.debug_prnd > 0) log.related_prn = mac_result.debug_prnd;
+            if (mac_result.debug_adkd != OsnmaAdkd::Reserved) log.adkd = mac_result.debug_adkd;
+            if (mac_result.debug_tag_cop >= 0) log.cop = mac_result.debug_tag_cop;
+            log.source = pending.source;
+            log.raw_source = pending.raw_source;
+            log.detail = "MACK tag could not be checked because matching navigation data was unavailable";
+            authenticated_nav_data_.PushLog(log);
             /*
                 Daniel processes a MACK once, when its disclosed key becomes
                 newly trusted. If the corresponding navigation data is not
@@ -798,6 +982,23 @@ OsnmaEngine::ProcessMacksForDisclosedKey(const OsnmaDsmKroot& trusted_kroot,
                 from terminal tag failures and do not spam the normal log.
             */
             ++statistics_.pending_macks_skipped_macseq;
+            PegasusLogRow log{};
+            log.rx_week = pending.mack.subframe_epoch.wn + GALILEO_GST_TO_GPS_WEEK_OFFSET;
+            log.rx_tom = pending.mack.subframe_epoch.tow;
+            log.prn = pending.mack.prn;
+            log.severity = PegasusLogSeverity::Warning;
+            log.event = PegasusLogEvent::MackMacseqRejected;
+            log.auth_reason = mac_result.reason;
+            log.stage = mac_result.debug_stage;
+            log.tag_index = mac_result.debug_tag_index;
+            log.ctr = mac_result.debug_ctr;
+            if (mac_result.debug_prnd > 0) log.related_prn = mac_result.debug_prnd;
+            if (mac_result.debug_adkd != OsnmaAdkd::Reserved) log.adkd = mac_result.debug_adkd;
+            if (mac_result.debug_tag_cop >= 0) log.cop = mac_result.debug_tag_cop;
+            log.source = pending.source;
+            log.raw_source = pending.raw_source;
+            log.detail = "MACK rejected by MACSEQ/MACLT consistency check";
+            authenticated_nav_data_.PushLog(log);
             RemovePendingMack(i);
             continue;
         }
@@ -817,6 +1018,27 @@ OsnmaEngine::ProcessMacksForDisclosedKey(const OsnmaDsmKroot& trusted_kroot,
             {
                 ++statistics_.pending_macks_failed_other;
             }
+
+            PegasusLogRow log{};
+            log.rx_week = pending.mack.subframe_epoch.wn + GALILEO_GST_TO_GPS_WEEK_OFFSET;
+            log.rx_tom = pending.mack.subframe_epoch.tow;
+            log.prn = pending.mack.prn;
+            log.severity = PegasusLogSeverity::Error;
+            log.event = (mac_result.reason == AuthReason::MackVerificationFailed &&
+                (mac_result.debug_stage == 2 || mac_result.debug_stage == 3))
+                ? PegasusLogEvent::MackTagVerificationFailed
+                : PegasusLogEvent::MackValidationFailed;
+            log.auth_reason = mac_result.reason;
+            log.stage = mac_result.debug_stage;
+            log.tag_index = mac_result.debug_tag_index;
+            log.ctr = mac_result.debug_ctr;
+            if (mac_result.debug_prnd > 0) log.related_prn = mac_result.debug_prnd;
+            if (mac_result.debug_adkd != OsnmaAdkd::Reserved) log.adkd = mac_result.debug_adkd;
+            if (mac_result.debug_tag_cop >= 0) log.cop = mac_result.debug_tag_cop;
+            log.source = pending.source;
+            log.raw_source = pending.raw_source;
+            log.detail = "Terminal MACK/tag verification failure";
+            authenticated_nav_data_.PushLog(log);
 
             printf("MACK validation failed at disclosed-key schedule: "
                 "reason=%d stage=%d mack_prn=%d tag_index=%d ctr=%d "
@@ -949,6 +1171,24 @@ OsnmaEngine::VerifyPendingMacks(const OsnmaDsmKroot& trusted_kroot,
 
             ++statistics_.pending_missing_navdata;
             saw_missing_nav = true;
+
+            PegasusLogRow log{};
+            log.rx_week = pending.mack.subframe_epoch.wn + GALILEO_GST_TO_GPS_WEEK_OFFSET;
+            log.rx_tom = pending.mack.subframe_epoch.tow;
+            log.prn = pending.mack.prn;
+            log.severity = PegasusLogSeverity::Warning;
+            log.event = PegasusLogEvent::MissingNavigationData;
+            log.auth_reason = mac_result.reason;
+            log.stage = mac_result.debug_stage;
+            log.tag_index = mac_result.debug_tag_index;
+            log.ctr = mac_result.debug_ctr;
+            if (mac_result.debug_prnd > 0) log.related_prn = mac_result.debug_prnd;
+            if (mac_result.debug_adkd != OsnmaAdkd::Reserved) log.adkd = mac_result.debug_adkd;
+            if (mac_result.debug_tag_cop >= 0) log.cop = mac_result.debug_tag_cop;
+            log.source = pending.source;
+            log.raw_source = pending.raw_source;
+            log.detail = "MACK tag could not be checked because matching navigation data was unavailable";
+            authenticated_nav_data_.PushLog(log);
             continue;
         }
 
@@ -963,6 +1203,23 @@ OsnmaEngine::VerifyPendingMacks(const OsnmaDsmKroot& trusted_kroot,
             mac_result.debug_stage == 1)
         {
             ++statistics_.pending_macks_skipped_macseq;
+            PegasusLogRow log{};
+            log.rx_week = pending.mack.subframe_epoch.wn + GALILEO_GST_TO_GPS_WEEK_OFFSET;
+            log.rx_tom = pending.mack.subframe_epoch.tow;
+            log.prn = pending.mack.prn;
+            log.severity = PegasusLogSeverity::Warning;
+            log.event = PegasusLogEvent::MackMacseqRejected;
+            log.auth_reason = mac_result.reason;
+            log.stage = mac_result.debug_stage;
+            log.tag_index = mac_result.debug_tag_index;
+            log.ctr = mac_result.debug_ctr;
+            if (mac_result.debug_prnd > 0) log.related_prn = mac_result.debug_prnd;
+            if (mac_result.debug_adkd != OsnmaAdkd::Reserved) log.adkd = mac_result.debug_adkd;
+            if (mac_result.debug_tag_cop >= 0) log.cop = mac_result.debug_tag_cop;
+            log.source = pending.source;
+            log.raw_source = pending.raw_source;
+            log.detail = "MACK rejected by MACSEQ/MACLT consistency check";
+            authenticated_nav_data_.PushLog(log);
             RemovePendingMack(i);
             continue;
         }
@@ -986,6 +1243,27 @@ OsnmaEngine::VerifyPendingMacks(const OsnmaDsmKroot& trusted_kroot,
             {
                 ++statistics_.pending_macks_failed_other;
             }
+
+            PegasusLogRow log{};
+            log.rx_week = pending.mack.subframe_epoch.wn + GALILEO_GST_TO_GPS_WEEK_OFFSET;
+            log.rx_tom = pending.mack.subframe_epoch.tow;
+            log.prn = pending.mack.prn;
+            log.severity = PegasusLogSeverity::Error;
+            log.event = (mac_result.reason == AuthReason::MackVerificationFailed &&
+                (mac_result.debug_stage == 2 || mac_result.debug_stage == 3))
+                ? PegasusLogEvent::MackTagVerificationFailed
+                : PegasusLogEvent::MackValidationFailed;
+            log.auth_reason = mac_result.reason;
+            log.stage = mac_result.debug_stage;
+            log.tag_index = mac_result.debug_tag_index;
+            log.ctr = mac_result.debug_ctr;
+            if (mac_result.debug_prnd > 0) log.related_prn = mac_result.debug_prnd;
+            if (mac_result.debug_adkd != OsnmaAdkd::Reserved) log.adkd = mac_result.debug_adkd;
+            if (mac_result.debug_tag_cop >= 0) log.cop = mac_result.debug_tag_cop;
+            log.source = pending.source;
+            log.raw_source = pending.raw_source;
+            log.detail = "Terminal MACK/tag verification failure";
+            authenticated_nav_data_.PushLog(log);
 
             printf("TAG terminal failed: "
                 "reason=%d stage=%d mack_prn=%d tag_index=%d ctr=%d "

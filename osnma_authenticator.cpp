@@ -100,7 +100,47 @@ FeedResult OsnmaAuthenticator::FeedPageParts(const GalileoInavPageParts& page)
         else
         {
             rec.state = AuthState::Unknown;
+
+            if (asm_reason != AuthReason::WaitingForMoreFrames &&
+                asm_reason != AuthReason::WaitingForKey &&
+                asm_reason != AuthReason::None)
+            {
+                PegasusLogRow log{};
+                if (IsTimeValid(page.page_epoch))
+                {
+                    log.rx_week = page.page_epoch.wn + GALILEO_GST_TO_GPS_WEEK_OFFSET;
+                    log.rx_tom = page.page_epoch.tow;
+                }
+                log.prn = page.prn;
+                log.severity = PegasusLogSeverity::Warning;
+                log.event = PegasusLogEvent::SubframeAssemblyFailed;
+                log.auth_reason = asm_reason;
+                log.source = page.source;
+                log.raw_source = page.native_source_code;
+                log.detail = "OSNMA subframe assembly failed";
+                engine_.AddPegasusLogRow(log);
+            }
         }
+    }
+    else if (parse_reason == AuthReason::InvalidFrameFormat ||
+             parse_reason == AuthReason::InvalidTime ||
+             parse_reason == AuthReason::BufferOverflow ||
+             parse_reason == AuthReason::InternalError)
+    {
+        PegasusLogRow log{};
+        if (IsTimeValid(page.page_epoch))
+        {
+            log.rx_week = page.page_epoch.wn + GALILEO_GST_TO_GPS_WEEK_OFFSET;
+            log.rx_tom = page.page_epoch.tow;
+        }
+        log.prn = page.prn;
+        log.severity = PegasusLogSeverity::Warning;
+        log.event = PegasusLogEvent::PageParseFailed;
+        log.auth_reason = parse_reason;
+        log.source = page.source;
+        log.raw_source = page.native_source_code;
+        log.detail = "OSNMA reserved-field/page parsing failed";
+        engine_.AddPegasusLogRow(log);
     }
 
     out.status = GetStatus(page.prn, page.page_epoch);
@@ -189,6 +229,21 @@ int32_t OsnmaAuthenticator::PegasusIonoRowCount() const
 int32_t OsnmaAuthenticator::PegasusDtimeRowCount() const
 {
     return engine_.PegasusDtimeRowCount();
+}
+
+bool OsnmaAuthenticator::PopPegasusLogRow(PegasusLogRow& row)
+{
+    return engine_.PopPegasusLogRow(row);
+}
+
+int32_t OsnmaAuthenticator::PegasusLogRowCount() const
+{
+    return engine_.PegasusLogRowCount();
+}
+
+void OsnmaAuthenticator::AddPegasusLogRow(const PegasusLogRow& row)
+{
+    engine_.AddPegasusLogRow(row);
 }
 
 bool OsnmaAuthenticator::SetMerkleRoot(const std::uint8_t* root_32_bytes)

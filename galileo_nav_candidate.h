@@ -80,6 +80,15 @@ struct GalileoNavCandidate
     bool IsTimingCopEligible(int32_t cop) const;
 };
 
+
+struct GalileoNavFeedObservation
+{
+    bool valid = false;
+    bool content_changed = false;
+    int32_t wt = -1;
+    GalileoNavCandidate candidate{};
+};
+
 class GalileoNavCandidateStore
 {
 public:
@@ -89,7 +98,8 @@ public:
     NavTimingMode GetNavTimingMode() const;
 
     bool FeedPage(const GalileoInavPageParts& page,
-        AuthReason& reason_out);
+        AuthReason& reason_out,
+        GalileoNavFeedObservation* observation = nullptr);
 
     void Cleanup(const GnssTime& now);
 
@@ -176,9 +186,11 @@ private:
 
     bool FeedCedPage(const GalileoInavPageParts& page,
         const PageHeader& header,
-        AuthReason& reason_out);
+        AuthReason& reason_out,
+        GalileoNavFeedObservation* observation);
 
     bool FeedTimingPage(const GalileoInavPageParts& page,
         const PageHeader& header,
-        AuthReason& reason_out);
+        AuthReason& reason_out,
+        GalileoNavFeedObservation* observation);
 };

@@ -214,9 +214,13 @@ NavTimingMode GalileoNavCandidateStore::GetNavTimingMode() const
 }
 
 bool GalileoNavCandidateStore::FeedPage(const GalileoInavPageParts& page,
-    AuthReason& reason_out)
+    AuthReason& reason_out,
+    GalileoNavFeedObservation* observation)
 {
     reason_out = AuthReason::None;
+
+    if (observation != nullptr)
+        *observation = GalileoNavFeedObservation{};
 
     if (page.prn <= 0)
     {
@@ -253,10 +257,10 @@ bool GalileoNavCandidateStore::FeedPage(const GalileoInavPageParts& page,
     }
 
     if (header.wt >= GAL_WT1 && header.wt <= GAL_WT5)
-        return FeedCedPage(page, header, reason_out);
+        return FeedCedPage(page, header, reason_out, observation);
 
     if (header.wt == GAL_WT6 || header.wt == GAL_WT10)
-        return FeedTimingPage(page, header, reason_out);
+        return FeedTimingPage(page, header, reason_out, observation);
 
     reason_out = AuthReason::UnsupportedMessage;
     return false;
@@ -264,7 +268,8 @@ bool GalileoNavCandidateStore::FeedPage(const GalileoInavPageParts& page,
 
 bool GalileoNavCandidateStore::FeedCedPage(const GalileoInavPageParts& page,
     const PageHeader& header,
-    AuthReason& reason_out)
+    AuthReason& reason_out,
+    GalileoNavFeedObservation* observation)
 {
     /*
         ADKD=0/12 CED is assembled per PRN and 30-second I/NAV
@@ -304,6 +309,14 @@ bool GalileoNavCandidateStore::FeedCedPage(const GalileoInavPageParts& page,
 
         candidates_[key] = candidate;
 
+        if (observation != nullptr)
+        {
+            observation->valid = true;
+            observation->content_changed = !same_word;
+            observation->wt = header.wt;
+            observation->candidate = candidate;
+        }
+
         reason_out = AuthReason::None;
         return true;
     }
@@ -334,13 +347,22 @@ bool GalileoNavCandidateStore::FeedCedPage(const GalileoInavPageParts& page,
     candidate.last_update_time = page.page_epoch;
     UpdateCedCompleteTime(candidate);
 
+    if (observation != nullptr)
+    {
+        observation->valid = true;
+        observation->content_changed = !same_word;
+        observation->wt = header.wt;
+        observation->candidate = candidate;
+    }
+
     reason_out = AuthReason::None;
     return true;
 }
 
 bool GalileoNavCandidateStore::FeedTimingPage(const GalileoInavPageParts& page,
     const PageHeader& header,
-    AuthReason& reason_out)
+    AuthReason& reason_out,
+    GalileoNavFeedObservation* observation)
 {
     /*
         Daniel-like ADKD=4 timing storage.
@@ -373,6 +395,10 @@ bool GalileoNavCandidateStore::FeedTimingPage(const GalileoInavPageParts& page,
                 subframe_time,
                 page.page_epoch);
 
+        const bool same_word =
+            candidate.HasWord(header.wt) &&
+            SameWordContents(candidate.words[header.wt], page);
+
         StoreWord(candidate,
             page,
             header.wt);
@@ -382,11 +408,23 @@ bool GalileoNavCandidateStore::FeedTimingPage(const GalileoInavPageParts& page,
 
         candidates_[key] = candidate;
 
+        if (observation != nullptr)
+        {
+            observation->valid = true;
+            observation->content_changed = !same_word;
+            observation->wt = header.wt;
+            observation->candidate = candidate;
+        }
+
         reason_out = AuthReason::None;
         return true;
     }
 
     GalileoNavCandidate& candidate = it->second;
+
+    const bool same_word =
+        candidate.HasWord(header.wt) &&
+        SameWordContents(candidate.words[header.wt], page);
 
     if (candidate.HasWord(header.wt))
     {
@@ -400,6 +438,14 @@ bool GalileoNavCandidateStore::FeedTimingPage(const GalileoInavPageParts& page,
 
     candidate.last_update_time = page.page_epoch;
     candidate.complete = candidate.IsComplete();
+
+    if (observation != nullptr)
+    {
+        observation->valid = true;
+        observation->content_changed = !same_word;
+        observation->wt = header.wt;
+        observation->candidate = candidate;
+    }
 
     reason_out = AuthReason::None;
     return true;

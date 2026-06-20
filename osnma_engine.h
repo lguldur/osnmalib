@@ -144,6 +144,10 @@ public:
     int32_t PegasusIonoRowCount() const;
     int32_t PegasusDtimeRowCount() const;
 
+    bool PopPegasusLogRow(PegasusLogRow& row);
+    int32_t PegasusLogRowCount() const;
+    void AddPegasusLogRow(const PegasusLogRow& row);
+
 private:
     static constexpr int32_t MAX_PENDING_MACKS = 64;
     static constexpr double PENDING_MACK_LIFETIME_S = 900.0;
@@ -200,6 +204,15 @@ private:
 
     Result VerifyPendingMacks(const OsnmaDsmKroot& trusted_kroot,
         const GnssTime& now);
+
+    void LogEvent(PegasusLogEvent event,
+        PegasusLogSeverity severity,
+        const GnssTime& time,
+        int32_t prn,
+        AuthReason reason,
+        NavSignalSource source,
+        int32_t raw_source,
+        const char* detail = nullptr);
 
 private:
     OsnmaDsmAssembler dsm_assembler_{};
