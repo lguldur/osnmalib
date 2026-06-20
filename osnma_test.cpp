@@ -65,6 +65,7 @@ namespace
     struct Rinex4Event
     {
         double absolute_gst_seconds = 0.0;
+        int32_t prn = 0;
         Rinex4RecordKind kind = Rinex4RecordKind::Ephemeris;
         std::size_t record_index = 0;
     };
@@ -1149,6 +1150,7 @@ namespace
                     AbsoluteGstSeconds(PreferredPageEpoch(
                         ced.ephemeris_transmission_time,
                         ced.navigation_time)),
+                    ced.prn,
                     Rinex4RecordKind::Ephemeris,
                     i});
             }
@@ -1159,6 +1161,7 @@ namespace
                     AbsoluteGstSeconds(PreferredPageEpoch(
                         ced.wt5_page_time,
                         ced.navigation_time)),
+                    ced.prn,
                     Rinex4RecordKind::Ionosphere,
                     i});
             }
@@ -1174,6 +1177,7 @@ namespace
                     AbsoluteGstSeconds(PreferredPageEpoch(
                         timing.wt6_page_time,
                         timing.navigation_time)),
+                    timing.prn,
                     Rinex4RecordKind::UtcOffset,
                     i});
             }
@@ -1184,6 +1188,7 @@ namespace
                     AbsoluteGstSeconds(PreferredPageEpoch(
                         timing.wt10_page_time,
                         timing.navigation_time)),
+                    timing.prn,
                     Rinex4RecordKind::GgtoOffset,
                     i});
             }
@@ -1194,6 +1199,9 @@ namespace
             {
                 if (a.absolute_gst_seconds != b.absolute_gst_seconds)
                     return a.absolute_gst_seconds < b.absolute_gst_seconds;
+
+                if (a.prn != b.prn)
+                    return a.prn < b.prn;
 
                 if (a.kind != b.kind)
                 {
