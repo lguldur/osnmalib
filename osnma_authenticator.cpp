@@ -91,6 +91,7 @@ FeedResult OsnmaAuthenticator::FeedPageParts(const GalileoInavPageParts& page)
         {
             const OsnmaEngine::Result engine_result =
                 engine_.ProcessSubframe(subframe,
+                    page.page_epoch,
                     page.source,
                     page.native_source_code);
 

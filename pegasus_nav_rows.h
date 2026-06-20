@@ -20,6 +20,13 @@
     All week numbers are continuous GPS weeks including rollover. For
     Galileo data decoded from GST, GPS_WEEK = GST_WEEK + 1024.
 
+    RX_WEEK/RX_TOM is the time at which the row becomes available to
+    Pegasus and is therefore the file synchronization key:
+      - initial unauthenticated row: navigation reception/completion time;
+      - authenticated repetition: authentication event time.
+
+    TX_WEEK/TX_TOM preserves the original navigation transmission/page time.
+
     CSV formatting is intentionally kept outside these structures:
       - floating-point values: %.17g
       - enums: decimal integers

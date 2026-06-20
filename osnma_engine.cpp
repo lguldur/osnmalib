@@ -196,7 +196,26 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
     NavSignalSource source,
     int32_t raw_source)
 {
+    return ProcessSubframe(subframe,
+        subframe.subframe_epoch,
+        source,
+        raw_source);
+}
+
+OsnmaEngine::Result
+OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
+    const GnssTime& reception_time,
+    NavSignalSource source,
+    int32_t raw_source)
+{
     ++statistics_.subframes_processed;
+
+    // subframe_epoch is the logical OSNMA time.  reception_time is the
+    // actual input-page time at which the complete subframe, and therefore
+    // any authentication result produced from it, became available.
+    const GnssTime event_time = IsTimeValid(reception_time)
+        ? reception_time
+        : subframe.subframe_epoch;
 
     nav_candidate_store_.Cleanup(subframe.subframe_epoch);
     CleanupPendingMacks(subframe.subframe_epoch);
@@ -528,7 +547,8 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
 
         Result mack_result =
             ProcessMacksForDisclosedKey(*trusted_kroot,
-                key_result.key_time);
+                key_result.key_time,
+                event_time);
 
         if (mack_result.state == AuthState::Yes)
             return mack_result;
@@ -865,7 +885,8 @@ GnssTime OsnmaEngine::AddSecondsNormalized(const GnssTime& time,
 
 OsnmaEngine::Result
 OsnmaEngine::ProcessMacksForDisclosedKey(const OsnmaDsmKroot& trusted_kroot,
-    const GnssTime& disclosed_key_time)
+    const GnssTime& disclosed_key_time,
+    const GnssTime& authentication_time)
 {
     Result result{};
     result.state = AuthState::Unknown;
@@ -917,7 +938,7 @@ OsnmaEngine::ProcessMacksForDisclosedKey(const OsnmaDsmKroot& trusted_kroot,
             ++statistics_.pending_macks_verified_ok;
             ++statistics_.auth_success;
             RegisterMacSuccesses(mac_result,
-                disclosed_key_time,
+                authentication_time,
                 pending.source,
                 pending.raw_source);
             RemovePendingMack(i);

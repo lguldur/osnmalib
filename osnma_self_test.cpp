@@ -1341,7 +1341,10 @@ bool OsnmaSelfTest::TestPegasusRowMapping(Result& result)
 
     if (!Check(result,
         eph.rx_week == 2421 &&
+        eph.rx_tom == 660.0 &&
         eph.auth_week == 2421 &&
+        eph.auth_tom == 660.0 &&
+        eph.tx_tom == 620.0 &&
         eph.toc_week == 2421 &&
         eph.toe_week == 2421 &&
         eph.prn == 7 &&
@@ -1366,7 +1369,9 @@ bool OsnmaSelfTest::TestPegasusRowMapping(Result& result)
 
     if (!Check(result,
         iono.rx_week == 2421 &&
-        iono.rx_tom == 618.0 &&
+        iono.rx_tom == 660.0 &&
+        iono.auth_tom == 660.0 &&
+        iono.tx_tom == 618.0 &&
         iono.storm_flags == 0x15u &&
         iono.ai0 == 21.0,
         "Pegasus iono-row mapping failed"))
@@ -1404,10 +1409,15 @@ bool OsnmaSelfTest::TestPegasusRowMapping(Result& result)
         dtime_count == 2 &&
         dtime[0].target_time_system == PegasusTimeSystem::Utc &&
         dtime[0].rx_week == 2421 &&
+        dtime[0].rx_tom == 690.0 &&
+        dtime[0].auth_tom == 690.0 &&
+        dtime[0].tx_tom == 624.0 &&
         dtime[0].reference_week == 2421 &&
         dtime[0].reference_tom == 43200.0 &&
         dtime[1].target_time_system == PegasusTimeSystem::Gps &&
-        dtime[1].rx_tom == 628.0 &&
+        dtime[1].rx_tom == 690.0 &&
+        dtime[1].auth_tom == 690.0 &&
+        dtime[1].tx_tom == 628.0 &&
         dtime[1].reference_tom == 14400.0,
         "Pegasus dtime-row mapping failed"))
     {

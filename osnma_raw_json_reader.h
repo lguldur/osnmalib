@@ -69,6 +69,11 @@ public:
         int32_t reorder_max_buffered_subframes = 0;
         int32_t reorder_out_of_order_subframes = 0;
         int32_t reorder_max_lateness_s = 0;
+
+        // Last valid page fed to the consumer after chronological reordering.
+        // This is the best event time for end-of-file reader summary logs.
+        GnssTime last_fed_page_time{};
+        bool has_last_fed_page_time = false;
     };
 
     using PageCallback =

@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <string>
@@ -462,15 +463,40 @@ bool OsnmaRawJsonReader::ReadFile(const char* filename,
                 return a.input_line < b.input_line;
             });
 
-        for (const JsonPendingSubframe& pending : pending_list)
+        std::vector<Page> pages;
+        for (JsonPendingSubframe& pending : pending_list)
         {
             ++local_stats.reorder_flushed_subframes;
+            pages.insert(pages.end(),
+                std::make_move_iterator(pending.pages.begin()),
+                std::make_move_iterator(pending.pages.end()));
+        }
 
-            for (const Page& page : pending.pages)
+        // JSON data is organised by satellite and there can be more than one
+        // input line for the same subframe epoch.  Pegasus consumes every
+        // output file as a chronological stream, so feed all pages sharing
+        // this buffered epoch by reception time (then deterministically by
+        // page index and PRN).
+        std::stable_sort(pages.begin(),
+            pages.end(),
+            [](const Page& a, const Page& b)
             {
-                if (!callback(page))
-                    return false;
-            }
+                if (a.page_time.wn != b.page_time.wn)
+                    return a.page_time.wn < b.page_time.wn;
+                if (a.page_time.tow != b.page_time.tow)
+                    return a.page_time.tow < b.page_time.tow;
+                if (a.page_index != b.page_index)
+                    return a.page_index < b.page_index;
+                return a.prn < b.prn;
+            });
+
+        for (const Page& page : pages)
+        {
+            local_stats.last_fed_page_time = page.page_time;
+            local_stats.has_last_fed_page_time = true;
+
+            if (!callback(page))
+                return false;
         }
 
         return true;

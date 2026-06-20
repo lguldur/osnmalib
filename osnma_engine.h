@@ -125,6 +125,13 @@ public:
         AuthReason& reason_out);
 
     Result ProcessSubframe(const OsnmaSubframe& subframe,
+        const GnssTime& reception_time,
+        NavSignalSource source,
+        int32_t raw_source);
+
+    // Backward-compatible entry point.  New callers should provide the
+    // reception time of the page that completed the subframe.
+    Result ProcessSubframe(const OsnmaSubframe& subframe,
         NavSignalSource source,
         int32_t raw_source);
 
@@ -200,7 +207,8 @@ private:
         double seconds);
 
     Result ProcessMacksForDisclosedKey(const OsnmaDsmKroot& trusted_kroot,
-        const GnssTime& disclosed_key_time);
+        const GnssTime& disclosed_key_time,
+        const GnssTime& authentication_time);
 
     Result VerifyPendingMacks(const OsnmaDsmKroot& trusted_kroot,
         const GnssTime& now);

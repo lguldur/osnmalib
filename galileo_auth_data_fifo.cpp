@@ -647,8 +647,10 @@ bool GalileoInavDecoder::MakePegasusEphRow(
         return gst_week + GALILEO_GST_TO_GPS_WEEK_OFFSET;
     };
 
-    out.rx_week = gps_week(data.ephemeris_transmission_time.wn);
-    out.rx_tom = data.ephemeris_transmission_time.tow;
+    // RX_* is the Pegasus event time.  This authenticated repetition
+    // becomes available only when OSNMA authentication completes.
+    out.rx_week = gps_week(data.authentication_time.wn);
+    out.rx_tom = data.authentication_time.tow;
     out.prn = data.prn;
 
     out.auth_status = AuthState::Yes;
@@ -718,8 +720,9 @@ bool GalileoInavDecoder::MakePegasusIonoRow(
         return gst_week + GALILEO_GST_TO_GPS_WEEK_OFFSET;
     };
 
-    out.rx_week = gps_week(data.wt5_page_time.wn);
-    out.rx_tom = data.wt5_page_time.tow;
+    // RX_* is the Pegasus event time, not the original WT5 page time.
+    out.rx_week = gps_week(data.authentication_time.wn);
+    out.rx_tom = data.authentication_time.tow;
     out.prn = data.prn;
 
     out.auth_status = AuthState::Yes;
@@ -763,8 +766,9 @@ int32_t GalileoInavDecoder::MakePegasusDtimeRows(
         PegasusDtimeRow& out = out_rows[count++];
         out = PegasusDtimeRow{};
 
-        out.rx_week = gps_week(data.wt6_page_time.wn);
-        out.rx_tom = data.wt6_page_time.tow;
+        // The authenticated UTC row is emitted at authentication time.
+        out.rx_week = gps_week(data.authentication_time.wn);
+        out.rx_tom = data.authentication_time.tow;
         out.prn = data.prn;
 
         out.auth_status = AuthState::Yes;
@@ -791,8 +795,9 @@ int32_t GalileoInavDecoder::MakePegasusDtimeRows(
         PegasusDtimeRow& out = out_rows[count++];
         out = PegasusDtimeRow{};
 
-        out.rx_week = gps_week(data.wt10_page_time.wn);
-        out.rx_tom = data.wt10_page_time.tow;
+        // The authenticated GGTO row is emitted at authentication time.
+        out.rx_week = gps_week(data.authentication_time.wn);
+        out.rx_tom = data.authentication_time.tow;
         out.prn = data.prn;
 
         out.auth_status = AuthState::Yes;
@@ -843,6 +848,14 @@ bool GalileoInavDecoder::MakeReceivedPegasusEphRow(
 
     if (!MakePegasusEphRow(decoded, out))
         return false;
+
+    // MakePegasusEphRow() is also used for authenticated repetitions and
+    // therefore maps RX_* from authentication_time.  For the initial
+    // unauthenticated row, RX_* must instead be the instant at which the
+    // complete WT1..WT5 ephemeris first became available.
+    out.rx_week = candidate.ced_complete_time.wn +
+        GALILEO_GST_TO_GPS_WEEK_OFFSET;
+    out.rx_tom = candidate.ced_complete_time.tow;
 
     out.auth_status = AuthState::Unknown;
     out.auth_reason = AuthReason::WaitingForAuthentication;
