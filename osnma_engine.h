@@ -48,6 +48,8 @@ public:
         std::int64_t dsm_messages_completed = 0;
         std::int64_t dsm_decode_ok = 0;
         std::int64_t dsm_decode_failed = 0;
+        std::int64_t dsm_kroot_assemblies_expired = 0;
+        std::int64_t dsm_pkr_assemblies_expired = 0;
 
         /*
             A DSM failure is non-fatal to the MACK carried by the same

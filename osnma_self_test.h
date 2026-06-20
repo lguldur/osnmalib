@@ -36,6 +36,7 @@ private:
     static bool TestCedCompletionEpochPreserved(Result& result);
     static bool TestAllZeroOsnmaSubframeIsNormal(Result& result);
     static bool TestAllZeroMackWithNonZeroHkrootIsRejected(Result& result);
+    static bool TestDsmAssemblyRetentionLimits(Result& result);
 
     static void Fail(Result& result,
         const char* message);

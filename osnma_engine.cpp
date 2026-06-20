@@ -340,6 +340,11 @@ OsnmaEngine::ProcessSubframe(const OsnmaSubframe& subframe,
     const bool complete =
         dsm_assembler_.FeedBlock(block, message);
 
+    statistics_.dsm_kroot_assemblies_expired =
+        dsm_assembler_.ExpiredKrootAssemblyCount();
+    statistics_.dsm_pkr_assemblies_expired =
+        dsm_assembler_.ExpiredPkrAssemblyCount();
+
     if (complete)
     {
         ++statistics_.dsm_messages_completed;

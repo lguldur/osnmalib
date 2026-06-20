@@ -1472,6 +1472,9 @@ static void PrintOsnmaEngineStatistics(const OsnmaEngine::Statistics& s)
            static_cast<long long>(s.dsm_decode_ok));
     printf("  dsm_decode_failed=%lld\n",
            static_cast<long long>(s.dsm_decode_failed));
+    printf("  dsm_kroot_assemblies_expired=%lld dsm_pkr_assemblies_expired=%lld\n",
+           static_cast<long long>(s.dsm_kroot_assemblies_expired),
+           static_cast<long long>(s.dsm_pkr_assemblies_expired));
     printf("  dsm_failures_nonfatal=%lld mack_parse_attempted_after_dsm_failure=%lld mack_parse_ok_after_dsm_failure=%lld\n",
            static_cast<long long>(s.dsm_failures_nonfatal),
            static_cast<long long>(s.mack_parse_attempted_after_dsm_failure),

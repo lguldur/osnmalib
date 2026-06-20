@@ -12,6 +12,7 @@
 #include "osnma_mac_input.h"
 #include "osnma_mac_verifier.h"
 #include "osnma_mack.h"
+#include "osnma_dsm.h"
 #include "osnma_engine.h"
 #include "osnma_tesla_chain.h"
 
@@ -816,6 +817,7 @@ OsnmaSelfTest::Result OsnmaSelfTest::RunAll()
     TestCedCompletionEpochPreserved(result);
     TestAllZeroOsnmaSubframeIsNormal(result);
     TestAllZeroMackWithNonZeroHkrootIsRejected(result);
+    TestDsmAssemblyRetentionLimits(result);
 
     return result;
 }
@@ -1613,6 +1615,136 @@ bool OsnmaSelfTest::TestAllZeroMackWithNonZeroHkrootIsRejected(
         log.auth_reason.value() == AuthReason::InvalidFrameFormat &&
         engine->PegasusLogRowCount() == 0,
         "Inconsistent all-zero MACK diagnostic classification failed");
+}
+
+bool OsnmaSelfTest::TestDsmAssemblyRetentionLimits(Result& result)
+{
+    ++result.test_count;
+
+    // OsnmaDsmAssembler contains state for every PRN and DSM ID and is too
+    // large for the normal Windows test-program stack.
+    auto assembler = std::make_unique<OsnmaDsmAssembler>();
+
+    const auto make_block = [](int32_t prn,
+                               int32_t dsm_id,
+                               int32_t block_id,
+                               double tow,
+                               std::uint8_t marker)
+        {
+            OsnmaDsmBlock block{};
+            block.prn = prn;
+            block.subframe_epoch = GnssTime{1234, tow};
+            block.dsm_header.dsm_id = dsm_id;
+            block.dsm_header.block_id = block_id;
+            block.dsm_header.type =
+                OsnmaDsmAssembler::DsmTypeFromId(dsm_id);
+            block.dsm_header.raw = static_cast<std::uint8_t>(
+                ((dsm_id & 0x0F) << 4) | (block_id & 0x0F));
+            block.data.fill(marker);
+
+            // NBDK=2 means eight DSM-KROOT blocks.
+            if (block.dsm_header.type == OsnmaDsmType::Kroot &&
+                block_id == 0)
+            {
+                block.data[0] = static_cast<std::uint8_t>(
+                    (2u << 4) | (marker & 0x0Fu));
+            }
+
+            // NBDP=7 means thirteen DSM-PKR blocks.
+            if (block.dsm_header.type == OsnmaDsmType::Pkr &&
+                block_id == 0)
+            {
+                block.data[0] = static_cast<std::uint8_t>(
+                    (7u << 4) | (marker & 0x0Fu));
+            }
+
+            return block;
+        };
+
+    OsnmaDsmMessage message{};
+
+    // Leave three old KROOT blocks incomplete.
+    for (int32_t bid = 4; bid <= 6; ++bid)
+    {
+        if (!Check(result,
+            !assembler->FeedBlock(
+                make_block(7, 10, bid, (bid - 4) * 30.0, 0x11u),
+                message),
+            "Old partial DSM-KROOT unexpectedly completed"))
+        {
+            return false;
+        }
+    }
+
+    // The first block of a later copy arrives more than one hour after the
+    // old partial copy.  It must start a clean assembly, not retain BIDs 4-6.
+    if (!Check(result,
+        !assembler->FeedBlock(
+            make_block(7, 10, 7, 39630.0, 0x22u),
+            message) &&
+        assembler->ExpiredKrootAssemblyCount() == 1,
+        "Incomplete DSM-KROOT was not discarded after one hour"))
+    {
+        return false;
+    }
+
+    for (int32_t bid = 0; bid <= 3; ++bid)
+    {
+        if (!Check(result,
+            !assembler->FeedBlock(
+                make_block(7, 10, bid, 39660.0 + bid * 30.0, 0x22u),
+                message),
+            "DSM-KROOT reused stale blocks from an expired copy"))
+        {
+            return false;
+        }
+    }
+
+    for (int32_t bid = 4; bid <= 6; ++bid)
+    {
+        const bool complete = assembler->FeedBlock(
+            make_block(7, 10, bid, 39780.0 + (bid - 4) * 30.0, 0x22u),
+            message);
+
+        if (!Check(result,
+            complete == (bid == 6),
+            "Clean DSM-KROOT copy completed at the wrong block"))
+        {
+            return false;
+        }
+    }
+
+    const int32_t block4_offset =
+        4 * OsnmaDsmBlock::SIZE_BYTES;
+
+    if (!Check(result,
+        message.block_count == 8 &&
+        message.data[block4_offset] == 0x22u,
+        "Completed DSM-KROOT still contains an expired block"))
+    {
+        return false;
+    }
+
+    // Check the separate 13-hour retention rule for DSM-PKR.
+    assembler->Reset();
+
+    if (!Check(result,
+        !assembler->FeedBlock(
+            make_block(8, 13, 5, 0.0, 0x33u),
+            message),
+        "Old partial DSM-PKR unexpectedly completed"))
+    {
+        return false;
+    }
+
+    return Check(result,
+        !assembler->FeedBlock(
+            make_block(8, 13, 0,
+                OsnmaDsmAssembler::PKR_MAX_ASSEMBLY_AGE_S,
+                0x44u),
+            message) &&
+        assembler->ExpiredPkrAssemblyCount() == 1,
+        "Incomplete DSM-PKR was not discarded after 13 hours");
 }
 
 void OsnmaSelfTest::Fail(Result& result,

@@ -65,11 +65,20 @@ public:
     static constexpr int32_t MAX_PRN = 256;
     static constexpr int32_t MAX_BLOCKS = OsnmaDsmMessage::MAX_BLOCKS;
 
+    // OSNMA Receiver Guidelines, sections 3.2 and 3.3:
+    // incomplete DSM-KROOT blocks are retained for at most one hour,
+    // while incomplete DSM-PKR blocks are retained for at most 13 hours.
+    static constexpr double KROOT_MAX_ASSEMBLY_AGE_S = 3600.0;
+    static constexpr double PKR_MAX_ASSEMBLY_AGE_S = 13.0 * 3600.0;
+
 public:
     void Reset();
 
     bool FeedBlock(const OsnmaDsmBlock& block,
                    OsnmaDsmMessage& message_out);
+
+    std::int64_t ExpiredKrootAssemblyCount() const;
+    std::int64_t ExpiredPkrAssemblyCount() const;
 
     static OsnmaDsmHeader ParseDsmHeader(uint8_t raw);
     static OsnmaDsmType DsmTypeFromId(int32_t dsm_id);
@@ -84,16 +93,26 @@ private:
         int32_t dsm_id = -1;
         OsnmaDsmType type = OsnmaDsmType::Unknown;
 
+        bool has_first_block_epoch = false;
+        GnssTime first_block_epoch{};
+
         std::array<bool, MAX_BLOCKS> received{};
         std::array<OsnmaDsmBlock, MAX_BLOCKS> blocks{};
     };
 
 private:
     bool IsValidPrn(int32_t prn) const;
+    static double MaximumAssemblyAgeSeconds(OsnmaDsmType type);
+    bool IsExpired(const SatState& sat,
+                   const OsnmaDsmBlock& new_block) const;
+    void StartAssembly(SatState& sat,
+                       const OsnmaDsmBlock& first_block);
     bool BuildIfComplete(SatState& sat,
                          const OsnmaDsmBlock& latest_block,
                          OsnmaDsmMessage& message_out);
 
 private:
     std::array<std::array<SatState, 16>, MAX_PRN> sats_{};
+    std::int64_t expired_kroot_assemblies_ = 0;
+    std::int64_t expired_pkr_assemblies_ = 0;
 };
