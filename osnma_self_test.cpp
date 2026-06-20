@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstring>
 #include <numbers>
+#include <memory>
 #include <vector>
 
 #include "galileo_auth_data_fifo.h"
@@ -1511,7 +1512,10 @@ bool OsnmaSelfTest::TestAllZeroOsnmaSubframeIsNormal(Result& result)
 {
     ++result.test_count;
 
-    OsnmaEngine engine{};
+    // OsnmaEngine is several megabytes because it owns the per-satellite
+    // navigation and OSNMA assembly state.  Keep it off the relatively small
+    // Windows thread stack used by the self-test executable.
+    auto engine = std::make_unique<OsnmaEngine>();
 
     OsnmaSubframe subframe{};
     subframe.prn = 4;
@@ -1520,13 +1524,13 @@ bool OsnmaSelfTest::TestAllZeroOsnmaSubframeIsNormal(Result& result)
     const GnssTime reception_time{1234, 345628.0};
 
     const OsnmaEngine::Result process_result =
-        engine.ProcessSubframe(subframe,
+        engine->ProcessSubframe(subframe,
             reception_time,
             NavSignalSource::Freq1,
             1);
 
     const OsnmaEngine::Statistics& statistics =
-        engine.GetStatistics();
+        engine->GetStatistics();
 
     if (!Check(result,
         process_result.state == AuthState::Unknown &&
@@ -1550,7 +1554,7 @@ bool OsnmaSelfTest::TestAllZeroOsnmaSubframeIsNormal(Result& result)
     }
 
     return Check(result,
-        engine.PegasusLogRowCount() == 0,
+        engine->PegasusLogRowCount() == 0,
         "All-zero OSNMA subframe generated an exceptional log row");
 }
 
@@ -1559,7 +1563,9 @@ bool OsnmaSelfTest::TestAllZeroMackWithNonZeroHkrootIsRejected(
 {
     ++result.test_count;
 
-    OsnmaEngine engine{};
+    // See TestAllZeroOsnmaSubframeIsNormal(): OsnmaEngine must not be a
+    // local stack object in the Windows self-test executable.
+    auto engine = std::make_unique<OsnmaEngine>();
 
     OsnmaSubframe subframe{};
     subframe.prn = 4;
@@ -1567,13 +1573,13 @@ bool OsnmaSelfTest::TestAllZeroMackWithNonZeroHkrootIsRejected(
     subframe.hkroot[0] = 0x40u;
 
     const OsnmaEngine::Result process_result =
-        engine.ProcessSubframe(subframe,
+        engine->ProcessSubframe(subframe,
             GnssTime{1234, 345628.0},
             NavSignalSource::Freq1,
             1);
 
     const OsnmaEngine::Statistics& statistics =
-        engine.GetStatistics();
+        engine->GetStatistics();
 
     if (!Check(result,
         process_result.state == AuthState::Unknown &&
@@ -1595,7 +1601,7 @@ bool OsnmaSelfTest::TestAllZeroMackWithNonZeroHkrootIsRejected(
 
     PegasusLogRow log{};
     if (!Check(result,
-        engine.PopPegasusLogRow(log),
+        engine->PopPegasusLogRow(log),
         "Inconsistent all-zero MACK did not generate a diagnostic row"))
     {
         return false;
@@ -1605,7 +1611,7 @@ bool OsnmaSelfTest::TestAllZeroMackWithNonZeroHkrootIsRejected(
         log.event == PegasusLogEvent::MackValidationFailed &&
         log.auth_reason.has_value() &&
         log.auth_reason.value() == AuthReason::InvalidFrameFormat &&
-        engine.PegasusLogRowCount() == 0,
+        engine->PegasusLogRowCount() == 0,
         "Inconsistent all-zero MACK diagnostic classification failed");
 }
 
