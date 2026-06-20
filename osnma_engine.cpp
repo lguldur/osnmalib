@@ -982,23 +982,13 @@ OsnmaEngine::ProcessMacksForDisclosedKey(const OsnmaDsmKroot& trusted_kroot,
                 from terminal tag failures and do not spam the normal log.
             */
             ++statistics_.pending_macks_skipped_macseq;
-            PegasusLogRow log{};
-            log.rx_week = pending.mack.subframe_epoch.wn + GALILEO_GST_TO_GPS_WEEK_OFFSET;
-            log.rx_tom = pending.mack.subframe_epoch.tow;
-            log.prn = pending.mack.prn;
-            log.severity = PegasusLogSeverity::Warning;
-            log.event = PegasusLogEvent::MackMacseqRejected;
-            log.auth_reason = mac_result.reason;
-            log.stage = mac_result.debug_stage;
-            log.tag_index = mac_result.debug_tag_index;
-            log.ctr = mac_result.debug_ctr;
-            if (mac_result.debug_prnd > 0) log.related_prn = mac_result.debug_prnd;
-            if (mac_result.debug_adkd != OsnmaAdkd::Reserved) log.adkd = mac_result.debug_adkd;
-            if (mac_result.debug_tag_cop >= 0) log.cop = mac_result.debug_tag_cop;
-            log.source = pending.source;
-            log.raw_source = pending.raw_source;
-            log.detail = "MACK rejected by MACSEQ/MACLT consistency check";
-            authenticated_nav_data_.PushLog(log);
+
+            /*
+                This is routine MACLT filtering rather than evidence of a
+                navigation-data authentication failure or RF interference.
+                Keep the aggregate diagnostic counter, but do not emit one
+                Pegasus log row per skipped MACK.
+            */
             RemovePendingMack(i);
             continue;
         }
@@ -1203,23 +1193,13 @@ OsnmaEngine::VerifyPendingMacks(const OsnmaDsmKroot& trusted_kroot,
             mac_result.debug_stage == 1)
         {
             ++statistics_.pending_macks_skipped_macseq;
-            PegasusLogRow log{};
-            log.rx_week = pending.mack.subframe_epoch.wn + GALILEO_GST_TO_GPS_WEEK_OFFSET;
-            log.rx_tom = pending.mack.subframe_epoch.tow;
-            log.prn = pending.mack.prn;
-            log.severity = PegasusLogSeverity::Warning;
-            log.event = PegasusLogEvent::MackMacseqRejected;
-            log.auth_reason = mac_result.reason;
-            log.stage = mac_result.debug_stage;
-            log.tag_index = mac_result.debug_tag_index;
-            log.ctr = mac_result.debug_ctr;
-            if (mac_result.debug_prnd > 0) log.related_prn = mac_result.debug_prnd;
-            if (mac_result.debug_adkd != OsnmaAdkd::Reserved) log.adkd = mac_result.debug_adkd;
-            if (mac_result.debug_tag_cop >= 0) log.cop = mac_result.debug_tag_cop;
-            log.source = pending.source;
-            log.raw_source = pending.raw_source;
-            log.detail = "MACK rejected by MACSEQ/MACLT consistency check";
-            authenticated_nav_data_.PushLog(log);
+
+            /*
+                This is routine MACLT filtering rather than evidence of a
+                navigation-data authentication failure or RF interference.
+                Keep the aggregate diagnostic counter, but do not emit one
+                Pegasus log row per skipped MACK.
+            */
             RemovePendingMack(i);
             continue;
         }
