@@ -95,6 +95,33 @@ namespace
         }
     }
 
+    static bool FeedSyntheticCedPage(
+        GalileoNavCandidateStore& store,
+        int32_t wt,
+        double tow,
+        std::uint8_t pattern)
+    {
+        std::array<std::uint8_t, GAL_INAV_BYTES> even{};
+        std::array<std::uint8_t, GAL_INAV_BYTES> odd{};
+
+        even.fill(pattern);
+        odd.fill(static_cast<std::uint8_t>(pattern + 1u));
+        SetBitsMsb0(even.data(),
+            0,
+            6,
+            static_cast<std::uint32_t>(wt));
+
+        GalileoInavPageParts page{};
+        page.prn = 7;
+        page.page_epoch = GnssTime{1234, tow};
+        page.crc_ok = true;
+        page.even = even.data();
+        page.odd = odd.data();
+
+        AuthReason reason = AuthReason::None;
+        return store.FeedPage(page, reason);
+    }
+
     static void FillWord(GalileoNavCandidate& candidate,
         int32_t wt,
         std::uint8_t pattern)
@@ -783,6 +810,7 @@ OsnmaSelfTest::Result OsnmaSelfTest::RunAll()
     TestMacseqWaitsForFutureKey(result);
     TestAuthenticatedCedDecode(result);
     TestAuthenticatedTimingDecode(result);
+    TestCedCompletionEpochPreserved(result);
 
     return result;
 }
@@ -1250,6 +1278,74 @@ bool OsnmaSelfTest::TestMacseqWaitsForFutureKey(Result& result)
     }
 
     return true;
+}
+
+bool OsnmaSelfTest::TestCedCompletionEpochPreserved(Result& result)
+{
+    ++result.test_count;
+
+    GalileoNavCandidateStore store{};
+
+    if (!Check(result,
+        FeedSyntheticCedPage(store, GAL_WT1, 0.0, 0x10u) &&
+        FeedSyntheticCedPage(store, GAL_WT2, 2.0, 0x20u) &&
+        FeedSyntheticCedPage(store, GAL_WT3, 4.0, 0x30u) &&
+        FeedSyntheticCedPage(store, GAL_WT4, 6.0, 0x40u) &&
+        FeedSyntheticCedPage(store, GAL_WT5, 8.0, 0x50u),
+        "CED completion-epoch initial pages failed"))
+    {
+        return false;
+    }
+
+    const GalileoNavCandidate* candidate =
+        store.FindComplete(7, -1, GnssTime{1234, 0.0}, 15);
+
+    if (!Check(result,
+        candidate != nullptr &&
+        candidate->has_ced_complete_time &&
+        candidate->ced_complete_time.wn == 1234 &&
+        candidate->ced_complete_time.tow == 8.0,
+        "CED completion epoch is not the latest WT1..WT5 page"))
+    {
+        return false;
+    }
+
+    if (!Check(result,
+        FeedSyntheticCedPage(store, GAL_WT1, 30.0, 0x10u) &&
+        FeedSyntheticCedPage(store, GAL_WT2, 32.0, 0x20u) &&
+        FeedSyntheticCedPage(store, GAL_WT3, 34.0, 0x30u) &&
+        FeedSyntheticCedPage(store, GAL_WT4, 36.0, 0x40u) &&
+        FeedSyntheticCedPage(store, GAL_WT5, 38.0, 0x50u),
+        "CED completion-epoch repeated pages failed"))
+    {
+        return false;
+    }
+
+    candidate = store.FindComplete(7, -1, GnssTime{1234, 30.0}, 15);
+
+    if (!Check(result,
+        candidate != nullptr &&
+        candidate->has_ced_complete_time &&
+        candidate->ced_complete_time.tow == 8.0,
+        "Repeated identical CED did not preserve earliest completion epoch"))
+    {
+        return false;
+    }
+
+    if (!Check(result,
+        FeedSyntheticCedPage(store, GAL_WT3, 64.0, 0x31u),
+        "CED completion-epoch changed page failed"))
+    {
+        return false;
+    }
+
+    candidate = store.FindComplete(7, -1, GnssTime{1234, 60.0}, 15);
+
+    return Check(result,
+        candidate != nullptr &&
+        candidate->has_ced_complete_time &&
+        candidate->ced_complete_time.tow == 64.0,
+        "Changed CED did not acquire a new completion epoch");
 }
 
 void OsnmaSelfTest::Fail(Result& result,

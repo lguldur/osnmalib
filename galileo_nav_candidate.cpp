@@ -9,6 +9,73 @@
 #define OSNMA_VERBOSE_NAVDATA 0
 #endif
 
+namespace
+{
+    bool SameWordContents(const GalileoNavWord& word,
+        const GalileoInavPageParts& page)
+    {
+        if (!word.valid || page.even == nullptr || page.odd == nullptr)
+            return false;
+
+        /*
+            The authenticated navigation object and the RINEX decoder use the
+            reconstructed 128-bit I/NAV word stored in even. The companion odd
+            buffer is not part of the ADKD navigation-data identity and may
+            contain receiver/page material that changes independently.
+        */
+        return std::memcmp(word.even.data(),
+            page.even,
+            GAL_INAV_BYTES) == 0;
+    }
+
+    bool LatestCedWordEpoch(const GalileoNavCandidate& candidate,
+        GnssTime& latest)
+    {
+        bool have_latest = false;
+
+        for (int32_t wt = GAL_WT1; wt <= GAL_WT5; ++wt)
+        {
+            const GalileoNavWord& word = candidate.words[wt];
+
+            if (!word.valid || !word.has_epoch ||
+                !IsTimeValid(word.page_epoch))
+            {
+                return false;
+            }
+
+            if (!have_latest ||
+                DiffSeconds(word.page_epoch, latest) > 0.0)
+            {
+                latest = word.page_epoch;
+                have_latest = true;
+            }
+        }
+
+        return have_latest;
+    }
+
+    void UpdateCedCompleteTime(GalileoNavCandidate& candidate)
+    {
+        candidate.complete = candidate.IsComplete();
+
+        if (!candidate.complete)
+        {
+            candidate.has_ced_complete_time = false;
+            return;
+        }
+
+        if (candidate.has_ced_complete_time)
+            return;
+
+        GnssTime latest{};
+        if (!LatestCedWordEpoch(candidate, latest))
+            return;
+
+        candidate.ced_complete_time = latest;
+        candidate.has_ced_complete_time = true;
+    }
+}
+
 bool GalileoNavCandidate::HasWord(int32_t wt) const
 {
     if (wt < 0 || wt > GAL_MAX_WT)
@@ -225,9 +292,15 @@ bool GalileoNavCandidateStore::FeedCedPage(const GalileoInavPageParts& page,
                 subframe_time,
                 page.page_epoch);
 
-        StoreWord(candidate, page, header.wt);
+        const bool same_word =
+            candidate.HasWord(header.wt) &&
+            SameWordContents(candidate.words[header.wt], page);
 
-        candidate.complete = candidate.IsComplete();
+        if (!same_word)
+            candidate.has_ced_complete_time = false;
+
+        StoreWord(candidate, page, header.wt);
+        UpdateCedCompleteTime(candidate);
 
         candidates_[key] = candidate;
 
@@ -237,22 +310,29 @@ bool GalileoNavCandidateStore::FeedCedPage(const GalileoInavPageParts& page,
 
     GalileoNavCandidate& candidate = it->second;
 
+    const bool same_word =
+        candidate.HasWord(header.wt) &&
+        SameWordContents(candidate.words[header.wt], page);
+
     if (candidate.HasWord(header.wt))
     {
         /*
             A repeated WT in the same 30 s subframe replaces the previous
-            copy. This is safer than rejecting the whole candidate, and it
-            avoids stale partial candidates when a receiver provides repeated
-            or corrected pages.
+            reception copy. If the bits are unchanged, preserve the earliest
+            completion epoch of the complete WT1..WT5 object; COP freshness is
+            still refreshed by StoreWord().
         */
         ClearWord(candidate,
             header.wt);
     }
 
+    if (!same_word)
+        candidate.has_ced_complete_time = false;
+
     StoreWord(candidate, page, header.wt);
 
     candidate.last_update_time = page.page_epoch;
-    candidate.complete = candidate.IsComplete();
+    UpdateCedCompleteTime(candidate);
 
     reason_out = AuthReason::None;
     return true;

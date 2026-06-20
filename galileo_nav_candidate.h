@@ -43,6 +43,15 @@ struct GalileoNavCandidate
     GnssTime creation_time{};
     GnssTime last_update_time{};
 
+    /*
+        Earliest epoch at which the exact current WT1..WT5 combination had
+        become complete. It is preserved while repeated subframes carry the
+        same word contents, even though the individual page reception epochs
+        and COP ages are refreshed.
+    */
+    GnssTime ced_complete_time{};
+    bool has_ced_complete_time = false;
+
     bool complete = false;
 
     /*

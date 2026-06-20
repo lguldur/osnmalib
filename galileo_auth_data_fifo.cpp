@@ -260,6 +260,34 @@ bool GalileoInavDecoder::DecodeCedStatus(
     out.authentication_time = authentication_time;
     out.wt1_page_time = candidate.words[GAL_WT1].page_epoch;
     out.wt5_page_time = candidate.words[GAL_WT5].page_epoch;
+
+    for (int32_t wt = GAL_WT1; wt <= GAL_WT5; ++wt)
+        out.page_times[static_cast<std::size_t>(wt - GAL_WT1)] =
+            candidate.words[wt].page_epoch;
+
+    if (candidate.has_ced_complete_time &&
+        IsTimeValid(candidate.ced_complete_time))
+    {
+        out.ephemeris_transmission_time =
+            candidate.ced_complete_time;
+    }
+    else
+    {
+        // Defensive fallback for manually-created candidates used by callers
+        // or tests that predate ced_complete_time tracking.
+        GnssTime latest = candidate.words[GAL_WT1].page_epoch;
+        for (int32_t wt = GAL_WT2; wt <= GAL_WT5; ++wt)
+        {
+            const GnssTime& epoch = candidate.words[wt].page_epoch;
+            if (IsTimeValid(epoch) &&
+                (!IsTimeValid(latest) || DiffSeconds(epoch, latest) > 0.0))
+            {
+                latest = epoch;
+            }
+        }
+        out.ephemeris_transmission_time = latest;
+    }
+
     out.prn = candidate.prn;
     out.auth_bits = auth_bits;
     out.nav_fingerprint = nav_fingerprint;

@@ -27,11 +27,17 @@ struct GalileoAuthenticatedCedStatus
     GnssTime navigation_time{};
     GnssTime authentication_time{};
 
-    // Reception epochs of the authenticated WT1 and WT5. WT1 is used
-    // as the ephemeris transmission time and WT5 as the NeQuick-G
-    // ionosphere-data transmission time in RINEX navigation output.
+    // Reception epochs of the authenticated WT1 and WT5 are kept for
+    // compatibility and for the WT5 NeQuick-G transmission epoch.
     GnssTime wt1_page_time{};
     GnssTime wt5_page_time{};
+
+    // page_times[0..4] contain the selected WT1..WT5 page epochs.
+    std::array<GnssTime, 5> page_times{};
+
+    // Earliest epoch at which this exact WT1..WT5 combination was complete.
+    // This is the RINEX ephemeris transmission time source.
+    GnssTime ephemeris_transmission_time{};
 
     int32_t prn = -1;
     std::int64_t auth_bits = 0;

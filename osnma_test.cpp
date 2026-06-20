@@ -217,10 +217,18 @@ namespace
         return -1.0;
     }
 
+    GnssTime PreferredPageEpoch(
+        const GnssTime& page_epoch,
+        const GnssTime& navigation_time);
+
     double RinexTransmissionTime(
         const GalileoAuthenticatedCedStatus& data)
     {
-        if (!IsTimeValid(data.wt1_page_time) ||
+        const GnssTime transmission_time =
+            PreferredPageEpoch(data.ephemeris_transmission_time,
+                data.navigation_time);
+
+        if (!IsTimeValid(transmission_time) ||
             data.ephemeris.WNToe > static_cast<unsigned long>(INT32_MAX))
         {
             return RINEX_UNKNOWN_TRANSMISSION_TIME;
@@ -229,8 +237,8 @@ namespace
         const int32_t toe_gst_week =
             static_cast<int32_t>(data.ephemeris.WNToe);
 
-        return data.wt1_page_time.tow +
-            static_cast<double>(data.wt1_page_time.wn - toe_gst_week) *
+        return transmission_time.tow +
+            static_cast<double>(transmission_time.wn - toe_gst_week) *
             SECONDS_PER_WEEK;
     }
 
@@ -954,14 +962,17 @@ namespace
                 timing.prn);
             WriteHeaderStyleLine(out, content, "TIME SYSTEM CORR");
 
+            /*
+                Galileo broadcasts WN_LSF modulo 256. Resolving it to the
+                nearest current week is wrong when it still refers to a past
+                leap-second event. Until historical disambiguation is added,
+                write only the unambiguous current leap-second value. The
+                RINEX time-system identifier is deliberately left blank.
+            */
             std::snprintf(content,
                 sizeof(content),
-                "%6d%6d%6d%6d%3s",
-                timing.utc.DeltaT_LS,
-                timing.utc.DeltaT_LSF,
-                GstWeekToRinexWeek(timing.utc.WN_LSF),
-                timing.utc.DN_LSF,
-                "E");
+                "%6d",
+                timing.utc.DeltaT_LS);
             WriteHeaderStyleLine(out, content, "LEAP SECONDS");
         }
 
@@ -1081,14 +1092,12 @@ namespace
                 continue;
 
             char content[160]{};
+            /* See the RINEX 3 header writer: WN_LSF is modulo 256 and may
+               describe a historical event, so only DeltaT_LS is unambiguous. */
             std::snprintf(content,
                 sizeof(content),
-                "%6d%6d%6d%6d%3s",
-                timing.utc.DeltaT_LS,
-                timing.utc.DeltaT_LSF,
-                GstWeekToRinexWeek(timing.utc.WN_LSF),
-                timing.utc.DN_LSF,
-                "E");
+                "%6d",
+                timing.utc.DeltaT_LS);
             WriteHeaderStyleLine(out, content, "LEAP SECONDS");
             break;
         }
@@ -1138,7 +1147,7 @@ namespace
             {
                 events.push_back(Rinex4Event{
                     AbsoluteGstSeconds(PreferredPageEpoch(
-                        ced.wt1_page_time,
+                        ced.ephemeris_transmission_time,
                         ced.navigation_time)),
                     Rinex4RecordKind::Ephemeris,
                     i});

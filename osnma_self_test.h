@@ -32,6 +32,7 @@ private:
     static bool TestMacseqWaitsForFutureKey(Result& result);
     static bool TestAuthenticatedCedDecode(Result& result);
     static bool TestAuthenticatedTimingDecode(Result& result);
+    static bool TestCedCompletionEpochPreserved(Result& result);
 
     static void Fail(Result& result,
         const char* message);
