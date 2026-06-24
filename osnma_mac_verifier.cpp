@@ -243,8 +243,7 @@ OsnmaMacVerifier::Verify(const OsnmaMackMessage& mack,
     const GalileoNavCandidateStore& nav_store,
     const OsnmaTeslaChain& tesla_chain,
     OsnmaMacFunction mac_function,
-    std::uint8_t nmas,
-    const GnssTime& now) const
+    std::uint8_t nmas) const
 {
     Result result{};
     result.state = AuthState::Unknown;
@@ -713,17 +712,7 @@ OsnmaMacVerifier::VerifyMacseq(const OsnmaMackMessage& mack,
         (static_cast<int32_t>(computed[0]) << 4) |
         ((static_cast<int32_t>(computed[1]) >> 4) & 0x0F);
 
-
-    const std::uint8_t expected0 =
-        static_cast<std::uint8_t>((mack.macseq >> 4) & 0xFF);
-
-    const std::uint8_t expected1_high =
-        static_cast<std::uint8_t>((mack.macseq & 0x0F) << 4);
-
-    if (computed[0] != expected0)
-        return MacseqStatus::MackVerificationFailed;
-
-    if ((computed[1] & 0xF0u) != expected1_high)
+    if (computed_macseq != mack.macseq)
         return MacseqStatus::MackVerificationFailed;
 
     return MacseqStatus::Ok;

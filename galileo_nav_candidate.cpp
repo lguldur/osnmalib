@@ -790,25 +790,10 @@ GalileoNavCandidateStore::MakeCedKeyFromSubframeTime(int32_t prn,
         static_cast<int32_t>(subframe_time.tow));
 }
 
-GalileoNavCandidateStore::Key
-GalileoNavCandidateStore::MakeTimingKey(int32_t prn)
-{
-    return Key(prn,
-        -1,
-        -1);
-}
-
 bool GalileoNavCandidateStore::IsSupportedWordType(int32_t wt)
 {
     return (wt >= GAL_WT1 && wt <= GAL_WT6) ||
         (wt == GAL_WT10);
-}
-
-bool GalileoNavCandidateStore::CanAcceptCedWord(const GalileoNavCandidate& candidate,
-    int32_t wt)
-{
-    (void)candidate;
-    return wt >= GAL_WT1 && wt <= GAL_WT5;
 }
 
 bool GalileoNavCandidateStore::IsExpired(const GalileoNavCandidate& candidate,

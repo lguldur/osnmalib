@@ -967,7 +967,6 @@ OsnmaEngine::ProcessMacksForDisclosedKey(const OsnmaDsmKroot& trusted_kroot,
     Result result{};
     result.state = AuthState::Unknown;
     result.reason = AuthReason::WaitingForKey;
-    result.auth_record_count = 0;
 
     if (!IsTimeValid(disclosed_key_time))
     {
@@ -1006,8 +1005,7 @@ OsnmaEngine::ProcessMacksForDisclosedKey(const OsnmaDsmKroot& trusted_kroot,
                 nav_candidate_store_,
                 tesla_chain_,
                 trusted_kroot.mac_function,
-                pending.nmas,
-                disclosed_key_time);
+                pending.nmas);
 
         if (mac_result.state == AuthState::Yes)
         {
@@ -1173,217 +1171,6 @@ OsnmaEngine::ProcessMacksForDisclosedKey(const OsnmaDsmKroot& trusted_kroot,
 }
 
 OsnmaEngine::Result
-OsnmaEngine::VerifyPendingMacks(const OsnmaDsmKroot& trusted_kroot,
-    const GnssTime& now)
-{
-    Result result{};
-    result.state = AuthState::Unknown;
-    result.reason = AuthReason::WaitingForKey;
-    result.auth_record_count = 0;
-
-    bool saw_pending = false;
-    bool saw_waiting_key = false;
-    bool saw_missing_nav = false;
-
-    ++statistics_.pending_verification_runs;
-
-    for (int32_t i = 0; i < MAX_PENDING_MACKS; ++i)
-    {
-        PendingMack& pending = pending_macks_[i];
-
-        if (!pending.valid)
-            continue;
-
-        saw_pending = true;
-        ++statistics_.pending_macks_checked;
-
-        const OsnmaMacVerifier::Result mac_result =
-            mac_verifier_.Verify(pending.mack,
-                nav_candidate_store_,
-                tesla_chain_,
-                trusted_kroot.mac_function,
-                pending.nmas,
-                pending.mack.subframe_epoch);
-
-        if (mac_result.state == AuthState::Yes)
-        {
-            ++statistics_.pending_macks_verified_ok;
-            RegisterMacSuccesses(mac_result,
-                now,
-                pending.source,
-                pending.raw_source);
-            RemovePendingMack(i);
-
-            result.state = AuthState::Yes;
-            result.reason = AuthReason::None;
-            result.auth_record_count = 0;
-            return result;
-        }
-
-        if (mac_result.reason == AuthReason::WaitingForKey)
-        {
-            ++statistics_.pending_waiting_for_key;
-            saw_waiting_key = true;
-            continue;
-        }
-
-        if (mac_result.reason == AuthReason::MissingNavData)
-        {
-            static int32_t missing_nav_debug_count = 0;
-
-            if (mac_result.reason == AuthReason::MissingNavData &&
-                missing_nav_debug_count < 50)
-            {
-                printf("TAG missing navdata: "
-                    "stage=%d mack_prn=%d tag_index=%d ctr=%d "
-                    "prnd=%d adkd=%d tag_cop=%d mack_wn=%d mack_tow=%.0f "
-                    "macseq=%d mack_cop=%d has_nav=%d has_key=%d has_mac_input=%d\n",
-                    mac_result.debug_stage,
-                    mac_result.debug_mack_prn,
-                    mac_result.debug_tag_index,
-                    mac_result.debug_ctr,
-                    mac_result.debug_prnd,
-                    static_cast<int32_t>(mac_result.debug_adkd),
-                    mac_result.debug_tag_cop,
-                    mac_result.debug_mack_wn,
-                    mac_result.debug_mack_tow,
-                    mac_result.debug_macseq,
-                    mac_result.debug_mack_cop,
-                    mac_result.debug_has_nav ? 1 : 0,
-                    mac_result.debug_has_key ? 1 : 0,
-                    mac_result.debug_has_mac_input ? 1 : 0);
-
-                ++missing_nav_debug_count;
-            }
-
-            ++statistics_.pending_missing_navdata;
-            saw_missing_nav = true;
-
-            PegasusLogRow log{};
-            log.rx_week = pending.mack.subframe_epoch.wn + GALILEO_GST_TO_GPS_WEEK_OFFSET;
-            log.rx_tom = pending.mack.subframe_epoch.tow;
-            log.prn = pending.mack.prn;
-            log.severity = PegasusLogSeverity::Warning;
-            log.event = PegasusLogEvent::MissingNavigationData;
-            log.auth_reason = mac_result.reason;
-            log.stage = mac_result.debug_stage;
-            log.tag_index = mac_result.debug_tag_index;
-            log.ctr = mac_result.debug_ctr;
-            if (mac_result.debug_prnd > 0) log.related_prn = mac_result.debug_prnd;
-            if (mac_result.debug_adkd != OsnmaAdkd::Reserved) log.adkd = mac_result.debug_adkd;
-            if (mac_result.debug_tag_cop >= 0) log.cop = mac_result.debug_tag_cop;
-            log.source = pending.source;
-            log.raw_source = pending.raw_source;
-            log.detail = "MACK tag could not be checked because matching navigation data was unavailable";
-            authenticated_nav_data_.PushLog(log);
-            continue;
-        }
-
-        /*
-            MACSEQ mismatches are kept separate from tag authentication
-            failures. Daniel's test-vector runner does not expose these as
-            visible authentication failures for configuration_1, so they are
-            counted as skipped MACKs here instead of polluting the terminal
-            tag-failure counter.
-        */
-        if (mac_result.reason == AuthReason::MackVerificationFailed &&
-            mac_result.debug_stage == 1)
-        {
-            ++statistics_.pending_macks_skipped_macseq;
-
-            /*
-                This is routine MACLT filtering rather than evidence of a
-                navigation-data authentication failure or RF interference.
-                Keep the aggregate diagnostic counter, but do not emit one
-                Pegasus log row per skipped MACK.
-            */
-            RemovePendingMack(i);
-            continue;
-        }
-
-        /*
-            At this point the relevant key was available and the MAC path
-            reached a real terminal failure for this pending MACK.
-        */
-        if (mac_result.reason == AuthReason::MackVerificationFailed ||
-            mac_result.reason == AuthReason::UnsupportedMessage ||
-            mac_result.reason == AuthReason::InvalidFrameFormat)
-        {
-            ++statistics_.pending_macks_terminal_failed;
-
-            if (mac_result.reason == AuthReason::MackVerificationFailed &&
-                (mac_result.debug_stage == 2 || mac_result.debug_stage == 3))
-            {
-                ++statistics_.pending_macks_failed_tag;
-            }
-            else
-            {
-                ++statistics_.pending_macks_failed_other;
-            }
-
-            PegasusLogRow log{};
-            log.rx_week = pending.mack.subframe_epoch.wn + GALILEO_GST_TO_GPS_WEEK_OFFSET;
-            log.rx_tom = pending.mack.subframe_epoch.tow;
-            log.prn = pending.mack.prn;
-            log.severity = PegasusLogSeverity::Error;
-            log.event = (mac_result.reason == AuthReason::MackVerificationFailed &&
-                (mac_result.debug_stage == 2 || mac_result.debug_stage == 3))
-                ? PegasusLogEvent::MackTagVerificationFailed
-                : PegasusLogEvent::MackValidationFailed;
-            log.auth_reason = mac_result.reason;
-            log.stage = mac_result.debug_stage;
-            log.tag_index = mac_result.debug_tag_index;
-            log.ctr = mac_result.debug_ctr;
-            if (mac_result.debug_prnd > 0) log.related_prn = mac_result.debug_prnd;
-            if (mac_result.debug_adkd != OsnmaAdkd::Reserved) log.adkd = mac_result.debug_adkd;
-            if (mac_result.debug_tag_cop >= 0) log.cop = mac_result.debug_tag_cop;
-            log.source = pending.source;
-            log.raw_source = pending.raw_source;
-            log.detail = "Terminal MACK/tag verification failure";
-            authenticated_nav_data_.PushLog(log);
-
-            printf("TAG terminal failed: "
-                "reason=%d stage=%d mack_prn=%d tag_index=%d ctr=%d "
-                "prnd=%d adkd=%d tag_cop=%d mack_wn=%d mack_tow=%.0f "
-                "macseq=%d mack_cop=%d has_nav=%d has_key=%d has_mac_input=%d\n",
-                static_cast<int32_t>(mac_result.reason),
-                mac_result.debug_stage,
-                mac_result.debug_mack_prn,
-                mac_result.debug_tag_index,
-                mac_result.debug_ctr,
-                mac_result.debug_prnd,
-                static_cast<int32_t>(mac_result.debug_adkd),
-                mac_result.debug_tag_cop,
-                mac_result.debug_mack_wn,
-                mac_result.debug_mack_tow,
-                mac_result.debug_macseq,
-                mac_result.debug_mack_cop,
-                mac_result.debug_has_nav ? 1 : 0,
-                mac_result.debug_has_key ? 1 : 0,
-                mac_result.debug_has_mac_input ? 1 : 0);
-
-            RemovePendingMack(i);
-            result.reason = mac_result.reason;
-        }
-    }
-
-    if (!saw_pending)
-    {
-        result.reason = AuthReason::WaitingForKey;
-    }
-    else if (saw_waiting_key)
-    {
-        result.reason = AuthReason::WaitingForKey;
-    }
-    else if (saw_missing_nav)
-    {
-        result.reason = AuthReason::MissingNavData;
-    }
-
-    return result;
-}
-
-OsnmaEngine::Result
 OsnmaEngine::MakePendingResult(const OsnmaSubframe& subframe,
     NavSignalSource source,
     int32_t raw_source,
@@ -1392,7 +1179,6 @@ OsnmaEngine::MakePendingResult(const OsnmaSubframe& subframe,
     Result result{};
     result.state = AuthState::Unknown;
     result.reason = reason;
-    result.auth_record_count = 0;
 
     (void)subframe;
     (void)source;

@@ -162,9 +162,6 @@
     <ClInclude Include="pegasus_csv_writer.h" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\mbedtls\build-vs\library\mbedcrypto.vcxproj">
-      <Project>{10629203-3954-31a8-9586-184d40026bb8}</Project>
-    </ProjectReference>
     <ProjectReference Include="..\osnmalib\osnmalib.vcxproj">
       <Project>{5e30e76a-2cbc-4eb4-b5d6-3aa921841aa9}</Project>
     </ProjectReference>

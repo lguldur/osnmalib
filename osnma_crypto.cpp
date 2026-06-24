@@ -1,6 +1,7 @@
 #include "osnma_crypto.h"
 
 #include <array>
+#include <cstdio>
 #include <cstddef>
 #include <cstdint>
 
@@ -10,10 +11,7 @@
 #include "mbedtls/md.h"
 #include "mbedtls/sha256.h"
 #include "mbedtls/sha512.h"
-
-#if defined(MBEDTLS_VERSION_MAJOR) && (MBEDTLS_VERSION_MAJOR >= 3)
 #include "mbedtls/sha3.h"
-#endif
 
 #ifndef OSNMA_VERBOSE_CRYPTO
 #define OSNMA_VERBOSE_CRYPTO 0
@@ -33,19 +31,11 @@ namespace
         if (!IsValidBuffer(data, size_bytes))
             return false;
 
-#if defined(MBEDTLS_VERSION_MAJOR) && (MBEDTLS_VERSION_MAJOR >= 3)
         const int rc =
             mbedtls_sha256(reinterpret_cast<const unsigned char*>(data),
                 static_cast<size_t>(size_bytes),
                 hash.data(),
                 0);
-#else
-        const int rc =
-            mbedtls_sha256_ret(reinterpret_cast<const unsigned char*>(data),
-                static_cast<size_t>(size_bytes),
-                hash.data(),
-                0);
-#endif
 
         return rc == 0;
     }
@@ -57,7 +47,6 @@ namespace
         if (!IsValidBuffer(data, size_bytes))
             return false;
 
-#if defined(MBEDTLS_VERSION_MAJOR) && (MBEDTLS_VERSION_MAJOR >= 3)
         const int rc =
             mbedtls_sha3(MBEDTLS_SHA3_256,
                 reinterpret_cast<const unsigned char*>(data),
@@ -66,12 +55,6 @@ namespace
                 hash.size());
 
         return rc == 0;
-#else
-        /*
-            Mbed TLS 2.x does not provide the SHA3 API used here.
-        */
-        return false;
-#endif
     }
 
     bool ComputeSha512(const std::uint8_t* data,
@@ -81,19 +64,11 @@ namespace
         if (!IsValidBuffer(data, size_bytes))
             return false;
 
-#if defined(MBEDTLS_VERSION_MAJOR) && (MBEDTLS_VERSION_MAJOR >= 3)
         const int rc =
             mbedtls_sha512(reinterpret_cast<const unsigned char*>(data),
                 static_cast<size_t>(size_bytes),
                 hash.data(),
                 0);
-#else
-        const int rc =
-            mbedtls_sha512_ret(reinterpret_cast<const unsigned char*>(data),
-                static_cast<size_t>(size_bytes),
-                hash.data(),
-                0);
-#endif
 
         return rc == 0;
     }
@@ -268,24 +243,6 @@ bool OsnmaSha3_256(const std::uint8_t* data,
 
     for (int32_t i = 0; i < 32; ++i)
         out_32_bytes[i] = static_cast<std::uint8_t>(hash[i]);
-
-    return true;
-}
-
-bool OsnmaSha512(const std::uint8_t* data,
-    int32_t size_bytes,
-    std::uint8_t* out_64_bytes)
-{
-    if (!IsValidBuffer(data, size_bytes) || out_64_bytes == nullptr)
-        return false;
-
-    std::array<unsigned char, 64> hash{};
-
-    if (!ComputeSha512(data, size_bytes, hash))
-        return false;
-
-    for (int32_t i = 0; i < 64; ++i)
-        out_64_bytes[i] = static_cast<std::uint8_t>(hash[i]);
 
     return true;
 }

@@ -76,8 +76,7 @@ public:
         const GalileoNavCandidateStore& nav_store,
         const OsnmaTeslaChain& tesla_chain,
         OsnmaMacFunction mac_function,
-        std::uint8_t nmas,
-        const GnssTime& now) const;
+        std::uint8_t nmas) const;
 
 private:
     enum class MacseqStatus

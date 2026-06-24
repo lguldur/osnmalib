@@ -1177,8 +1177,7 @@ bool OsnmaSelfTest::TestMacseqValidThenMissingNavData(Result& result)
             nav_store,
             chain,
             OsnmaMacFunction::HmacSha256,
-            0,
-            mack.subframe_epoch);
+            0);
 
     if (!Check(result,
         verify_result.state == AuthState::Unknown,
@@ -1222,8 +1221,7 @@ bool OsnmaSelfTest::TestMacseqRejectsWrongMacseq(Result& result)
             nav_store,
             chain,
             OsnmaMacFunction::HmacSha256,
-            0,
-            mack.subframe_epoch);
+            0);
 
     if (!Check(result,
         verify_result.state == AuthState::Unknown,
@@ -1267,8 +1265,7 @@ bool OsnmaSelfTest::TestMacseqWaitsForFutureKey(Result& result)
             nav_store,
             chain,
             OsnmaMacFunction::HmacSha256,
-            0,
-            mack.subframe_epoch);
+            0);
 
     if (!Check(result,
         verify_result.state == AuthState::Unknown,

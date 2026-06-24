@@ -8,6 +8,7 @@
 #define OSNMA_VERBOSE_CRYPTO 0
 #endif
 
+#if OSNMA_VERBOSE_CRYPTO
 static void PrintHexPrefix(const char* name,
     const std::uint8_t* data,
     int32_t size,
@@ -31,6 +32,7 @@ static void PrintHexPrefix(const char* name,
 
     printf("\n");
 }
+#endif
 
 bool OsnmaKrootVerifier::Verify(const OsnmaDsmKroot& kroot,
     const OsnmaDsmPkr& public_key,

@@ -11,9 +11,6 @@ bool OsnmaSha3_256(const std::uint8_t* data,
     int32_t size_bytes,
     std::uint8_t* out_32_bytes);
 
-bool OsnmaSha512(const std::uint8_t* data,
-    int32_t size_bytes,
-    std::uint8_t* out_64_bytes);
 
 bool OsnmaHmacSha256(const std::uint8_t* key,
     int32_t key_size_bytes,

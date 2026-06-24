@@ -30,14 +30,6 @@ public:
         std::uint8_t nmas,
         std::vector<std::uint8_t>& out);
 
-    static bool DebugBuildTag0Adkd0Ranges(const OsnmaMackMessage& mack,
-        const GalileoNavCandidate& candidate,
-        std::uint8_t nmas,
-        int32_t common_first_bit_delta,
-        int32_t wt3_bit_count,
-        int32_t wt5_bit_count,
-        std::vector<std::uint8_t>& out);
-
 private:
     struct NavDataRange
     {
@@ -50,7 +42,6 @@ private:
     {
     public:
         void AppendBits(std::uint32_t value, int32_t bit_count);
-        void AppendBytesMsb0(const std::uint8_t* data, int32_t bit_count);
         void AppendBitsMsb0(const std::uint8_t* data,
             int32_t first_bit,
             int32_t bit_count);
@@ -58,7 +49,6 @@ private:
         void PadToByte();
 
         const std::vector<std::uint8_t>& Bytes() const;
-        int32_t BitCount() const;
 
     private:
         std::vector<std::uint8_t> bytes_{};

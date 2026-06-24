@@ -29,13 +29,6 @@ void OsnmaMacInputBuilder::BitWriter::AppendBits(std::uint32_t value,
     }
 }
 
-void OsnmaMacInputBuilder::BitWriter::AppendBytesMsb0(const std::uint8_t* data,
-    int32_t bit_count)
-{
-    AppendBitsMsb0(data,
-        0,
-        bit_count);
-}
 
 void OsnmaMacInputBuilder::BitWriter::AppendBitsMsb0(const std::uint8_t* data,
     int32_t first_bit,
@@ -91,10 +84,6 @@ OsnmaMacInputBuilder::BitWriter::Bytes() const
     return bytes_;
 }
 
-int32_t OsnmaMacInputBuilder::BitWriter::BitCount() const
-{
-    return bit_count_;
-}
 
 bool OsnmaMacInputBuilder::BuildTag0Message(const OsnmaMackMessage& mack,
     const GalileoNavCandidate& candidate,
@@ -222,72 +211,6 @@ bool OsnmaMacInputBuilder::BuildTagMessage(const OsnmaMackMessage& mack,
         out);
 }
 
-
-bool OsnmaMacInputBuilder::DebugBuildTag0Adkd0Ranges(const OsnmaMackMessage& mack,
-    const GalileoNavCandidate& candidate,
-    std::uint8_t nmas,
-    int32_t common_first_bit_delta,
-    int32_t wt3_bit_count,
-    int32_t wt5_bit_count,
-    std::vector<std::uint8_t>& out)
-{
-    out.clear();
-
-    if (!mack.valid_layout)
-        return false;
-
-    if (mack.prn <= 0 || mack.prn > 255)
-        return false;
-
-    if (!candidate.HasCedData())
-        return false;
-
-    const int32_t common_first_bit = 6 + common_first_bit_delta;
-
-    if (common_first_bit < 0)
-        return false;
-
-    if (wt3_bit_count <= 0 || wt5_bit_count <= 0)
-        return false;
-
-    static constexpr int32_t GAL_INAV_BITS_LOCAL = 128;
-
-    NavDataRange ranges[5] =
-    {
-        NavDataRange{GAL_WT1, common_first_bit, 120},
-        NavDataRange{GAL_WT2, common_first_bit, 120},
-        NavDataRange{GAL_WT3, common_first_bit, wt3_bit_count},
-        NavDataRange{GAL_WT4, common_first_bit, 120},
-        NavDataRange{GAL_WT5, common_first_bit, wt5_bit_count}
-    };
-
-    for (const NavDataRange& r : ranges)
-    {
-        if ((r.first_bit + r.bit_count) > GAL_INAV_BITS_LOCAL)
-            return false;
-    }
-
-    BitWriter writer{};
-
-    writer.AppendBits(static_cast<std::uint32_t>(mack.prn), 8);
-    writer.AppendBits(GstSf32(mack.subframe_epoch), 32);
-    writer.AppendBits(1u, 8);
-    writer.AppendBits(static_cast<std::uint32_t>(nmas & 0x03u), 2);
-
-    if (!AppendRanges(candidate,
-        ranges,
-        5,
-        false,
-        writer))
-    {
-        return false;
-    }
-
-    writer.PadToByte();
-
-    out = writer.Bytes();
-    return !out.empty();
-}
 
 bool OsnmaMacInputBuilder::BuildCommonMessage(std::uint8_t prnd,
     std::uint8_t prna,

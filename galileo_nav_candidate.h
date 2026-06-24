@@ -146,12 +146,7 @@ private:
     static Key MakeCedKeyFromSubframeTime(int32_t prn,
         const GnssTime& subframe_time);
 
-    static Key MakeTimingKey(int32_t prn);
-
     static bool IsSupportedWordType(int32_t wt);
-
-    static bool CanAcceptCedWord(const GalileoNavCandidate& candidate,
-        int32_t wt);
 
     static bool IsExpired(const GalileoNavCandidate& candidate,
         const GnssTime& now);

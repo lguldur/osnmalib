@@ -1,7 +1,11 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <ClInclude Include="auth_record.h" />
+    <Filter Include="Third Party\Mbed TLS">
+      <UniqueIdentifier>{A8E48E1E-350E-4C3C-A6A2-DF25E32B90EF}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
     <ClInclude Include="galileo_inav_page_parts.h" />
     <ClInclude Include="gnss_time.h" />
     <ClInclude Include="nav_signal_source.h" />
@@ -10,7 +14,6 @@
     <ClInclude Include="osnma_crypto.h" />
     <ClInclude Include="osnma_dsm.h" />
     <ClInclude Include="osnma_dsm_content.h" />
-    <ClInclude Include="osnma_dsm_parser.h" />
     <ClInclude Include="osnma_engine.h" />
     <ClInclude Include="osnma_kroot_verify.h" />
     <ClInclude Include="osnma_mack.h" />
@@ -35,7 +38,6 @@
     <ClCompile Include="osnma_crypto.cpp" />
     <ClCompile Include="osnma_dsm.cpp" />
     <ClCompile Include="osnma_dsm_content.cpp" />
-    <ClCompile Include="osnma_dsm_parser.cpp" />
     <ClCompile Include="osnma_engine.cpp" />
     <ClCompile Include="osnma_kroot_verify.cpp" />
     <ClCompile Include="osnma_mack.cpp" />
@@ -53,5 +55,56 @@
     <ClCompile Include="osnma_raw_json_reader.cpp" />
     <ClCompile Include="osnma_official_test_vector_reader.cpp" />
     <ClCompile Include="osnma_xml_material_loader.cpp" />
+    <ClCompile Include="third_party\mbedtls\library\aes.c">
+      <Filter>Third Party\Mbed TLS</Filter>
+    </ClCompile>
+    <ClCompile Include="third_party\mbedtls\library\asn1parse.c">
+      <Filter>Third Party\Mbed TLS</Filter>
+    </ClCompile>
+    <ClCompile Include="third_party\mbedtls\library\asn1write.c">
+      <Filter>Third Party\Mbed TLS</Filter>
+    </ClCompile>
+    <ClCompile Include="third_party\mbedtls\library\bignum.c">
+      <Filter>Third Party\Mbed TLS</Filter>
+    </ClCompile>
+    <ClCompile Include="third_party\mbedtls\library\bignum_core.c">
+      <Filter>Third Party\Mbed TLS</Filter>
+    </ClCompile>
+    <ClCompile Include="third_party\mbedtls\library\cipher.c">
+      <Filter>Third Party\Mbed TLS</Filter>
+    </ClCompile>
+    <ClCompile Include="third_party\mbedtls\library\cipher_wrap.c">
+      <Filter>Third Party\Mbed TLS</Filter>
+    </ClCompile>
+    <ClCompile Include="third_party\mbedtls\library\cmac.c">
+      <Filter>Third Party\Mbed TLS</Filter>
+    </ClCompile>
+    <ClCompile Include="third_party\mbedtls\library\constant_time.c">
+      <Filter>Third Party\Mbed TLS</Filter>
+    </ClCompile>
+    <ClCompile Include="third_party\mbedtls\library\ecdsa.c">
+      <Filter>Third Party\Mbed TLS</Filter>
+    </ClCompile>
+    <ClCompile Include="third_party\mbedtls\library\ecp.c">
+      <Filter>Third Party\Mbed TLS</Filter>
+    </ClCompile>
+    <ClCompile Include="third_party\mbedtls\library\ecp_curves.c">
+      <Filter>Third Party\Mbed TLS</Filter>
+    </ClCompile>
+    <ClCompile Include="third_party\mbedtls\library\md.c">
+      <Filter>Third Party\Mbed TLS</Filter>
+    </ClCompile>
+    <ClCompile Include="third_party\mbedtls\library\platform_util.c">
+      <Filter>Third Party\Mbed TLS</Filter>
+    </ClCompile>
+    <ClCompile Include="third_party\mbedtls\library\sha256.c">
+      <Filter>Third Party\Mbed TLS</Filter>
+    </ClCompile>
+    <ClCompile Include="third_party\mbedtls\library\sha3.c">
+      <Filter>Third Party\Mbed TLS</Filter>
+    </ClCompile>
+    <ClCompile Include="third_party\mbedtls\library\sha512.c">
+      <Filter>Third Party\Mbed TLS</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

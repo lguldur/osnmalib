@@ -222,24 +222,6 @@ public:
     bool PopPegasusLogRow(PegasusLogRow& row);
     int32_t PegasusLogRowCount() const;
 
-    /*
-        Legacy standalone queues retained for source compatibility. They are
-        not populated automatically by OsnmaEngine; new code should consume
-        the combined authenticated records above so authentication metadata
-        and the exact raw words remain attached to the decoded structures.
-    */
-    void PushEph(const GALEphDecodedType& eph);
-    void PushIono(const GALIonoDecodedType& iono);
-    void PushTime(const GALTimeDecodedType& time);
-
-    bool PopEph(GALEphDecodedType& eph);
-    bool PopIono(GALIonoDecodedType& iono);
-    bool PopTime(GALTimeDecodedType& time);
-
-    int32_t EphCount() const;
-    int32_t IonoCount() const;
-    int32_t TimeCount() const;
-
 private:
     std::deque<GalileoAuthenticatedCedStatus> ced_status_;
     std::deque<GalileoAuthenticatedTiming> timing_;
@@ -256,8 +238,4 @@ private:
     std::array<std::optional<std::uint64_t>, PEGASUS_MAX_PRN> last_auth_eph_{};
     std::array<std::optional<std::uint64_t>, PEGASUS_MAX_PRN> last_auth_iono_{};
     std::array<std::array<std::optional<std::uint64_t>, 2>, PEGASUS_MAX_PRN> last_auth_dtime_{};
-
-    std::deque<AuthEphRecord> eph_;
-    std::deque<AuthIonoRecord> iono_;
-    std::deque<AuthTimeRecord> time_;
 };

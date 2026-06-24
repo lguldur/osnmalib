@@ -986,9 +986,6 @@ void GalileoAuthDataFifo::Reset()
     last_auth_iono_.fill(std::nullopt);
     for (auto& row : last_rx_dtime_) row.fill(std::nullopt);
     for (auto& row : last_auth_dtime_) row.fill(std::nullopt);
-    eph_.clear();
-    iono_.clear();
-    time_.clear();
 }
 
 void GalileoAuthDataFifo::PushCedStatus(
@@ -1209,68 +1206,3 @@ int32_t GalileoAuthDataFifo::PegasusLogRowCount() const
     return static_cast<int32_t>(pegasus_log_rows_.size());
 }
 
-void GalileoAuthDataFifo::PushEph(const GALEphDecodedType& eph)
-{
-    AuthEphRecord r;
-    r.data = eph;
-    eph_.push_back(r);
-}
-
-void GalileoAuthDataFifo::PushIono(const GALIonoDecodedType& iono)
-{
-    AuthIonoRecord r;
-    r.data = iono;
-    iono_.push_back(r);
-}
-
-void GalileoAuthDataFifo::PushTime(const GALTimeDecodedType& time)
-{
-    AuthTimeRecord r;
-    r.data = time;
-    time_.push_back(r);
-}
-
-bool GalileoAuthDataFifo::PopEph(GALEphDecodedType& eph)
-{
-    if (eph_.empty())
-        return false;
-
-    eph = eph_.front().data;
-    eph_.pop_front();
-    return true;
-}
-
-bool GalileoAuthDataFifo::PopIono(GALIonoDecodedType& iono)
-{
-    if (iono_.empty())
-        return false;
-
-    iono = iono_.front().data;
-    iono_.pop_front();
-    return true;
-}
-
-bool GalileoAuthDataFifo::PopTime(GALTimeDecodedType& time)
-{
-    if (time_.empty())
-        return false;
-
-    time = time_.front().data;
-    time_.pop_front();
-    return true;
-}
-
-int32_t GalileoAuthDataFifo::EphCount() const
-{
-    return static_cast<int32_t>(eph_.size());
-}
-
-int32_t GalileoAuthDataFifo::IonoCount() const
-{
-    return static_cast<int32_t>(iono_.size());
-}
-
-int32_t GalileoAuthDataFifo::TimeCount() const
-{
-    return static_cast<int32_t>(time_.size());
-}

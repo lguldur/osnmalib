@@ -19,7 +19,6 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="auth_record.h" />
     <ClInclude Include="galileo_auth_data_fifo.h" />
     <ClInclude Include="galileo_inav_page_parts.h" />
     <ClInclude Include="galileo_nav_candidate.h" />
@@ -30,7 +29,6 @@
     <ClInclude Include="osnma_crypto.h" />
     <ClInclude Include="osnma_dsm.h" />
     <ClInclude Include="osnma_dsm_content.h" />
-    <ClInclude Include="osnma_dsm_parser.h" />
     <ClInclude Include="osnma_engine.h" />
     <ClInclude Include="osnma_kroot_verify.h" />
     <ClInclude Include="osnma_mack.h" />
@@ -57,7 +55,6 @@
     <ClCompile Include="osnma_crypto.cpp" />
     <ClCompile Include="osnma_dsm.cpp" />
     <ClCompile Include="osnma_dsm_content.cpp" />
-    <ClCompile Include="osnma_dsm_parser.cpp" />
     <ClCompile Include="osnma_engine.cpp" />
     <ClCompile Include="osnma_kroot_verify.cpp" />
     <ClCompile Include="osnma_mack.cpp" />
@@ -73,6 +70,91 @@
     <ClCompile Include="osnma_tesla_chain.cpp" />
     <ClCompile Include="osnma_trust_store.cpp" />
     <ClCompile Include="osnma_xml_material_loader.cpp" />
+    <ClCompile Include="third_party\mbedtls\library\aes.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mbedtls_%(Filename).obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="third_party\mbedtls\library\asn1parse.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mbedtls_%(Filename).obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="third_party\mbedtls\library\asn1write.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mbedtls_%(Filename).obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="third_party\mbedtls\library\bignum.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mbedtls_%(Filename).obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="third_party\mbedtls\library\bignum_core.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mbedtls_%(Filename).obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="third_party\mbedtls\library\cipher.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mbedtls_%(Filename).obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="third_party\mbedtls\library\cipher_wrap.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mbedtls_%(Filename).obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="third_party\mbedtls\library\cmac.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mbedtls_%(Filename).obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="third_party\mbedtls\library\constant_time.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mbedtls_%(Filename).obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="third_party\mbedtls\library\ecdsa.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mbedtls_%(Filename).obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="third_party\mbedtls\library\ecp.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mbedtls_%(Filename).obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="third_party\mbedtls\library\ecp_curves.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mbedtls_%(Filename).obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="third_party\mbedtls\library\md.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mbedtls_%(Filename).obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="third_party\mbedtls\library\platform_util.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mbedtls_%(Filename).obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="third_party\mbedtls\library\sha256.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mbedtls_%(Filename).obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="third_party\mbedtls\library\sha3.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mbedtls_%(Filename).obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="third_party\mbedtls\library\sha512.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <CompileAs>CompileAsC</CompileAs>
+      <ObjectFileName>$(IntDir)mbedtls_%(Filename).obj</ObjectFileName>
+    </ClCompile>
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
@@ -140,6 +222,7 @@
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <AdditionalIncludeDirectories>$(ProjectDir)third_party\mbedtls\include;$(ProjectDir)third_party\mbedtls\library;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>false</MultiProcessorCompilation>
     </ClCompile>
     <Link>
@@ -158,6 +241,7 @@
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <AdditionalIncludeDirectories>$(ProjectDir)third_party\mbedtls\include;$(ProjectDir)third_party\mbedtls\library;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>
@@ -174,7 +258,7 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>..\mbedtls\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)third_party\mbedtls\include;$(ProjectDir)third_party\mbedtls\library;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <AdditionalOptions>%(AdditionalOptions) /utf-8 /MP6</AdditionalOptions>
     </ClCompile>
@@ -194,7 +278,7 @@
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>..\mbedtls\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)third_party\mbedtls\include;$(ProjectDir)third_party\mbedtls\library;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <MultiProcessorCompilation>false</MultiProcessorCompilation>
       <AdditionalOptions>%(AdditionalOptions) /utf-8 /MP6</AdditionalOptions>

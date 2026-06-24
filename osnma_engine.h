@@ -5,7 +5,6 @@
 #include <map>
 #include <tuple>
 
-#include "auth_record.h"
 #include "galileo_auth_data_fifo.h"
 #include "galileo_inav_page_parts.h"
 #include "galileo_nav_candidate.h"
@@ -22,15 +21,10 @@
 class OsnmaEngine
 {
 public:
-    static constexpr int32_t MAX_AUTH_RECORDS_PER_SUBFRAME = 64;
-
     struct Result
     {
         AuthState state = AuthState::Unknown;
         AuthReason reason = AuthReason::WaitingForKey;
-
-        int32_t auth_record_count = 0;
-        std::array<AuthRecord, MAX_AUTH_RECORDS_PER_SUBFRAME> auth_records{};
     };
 
     struct Statistics
@@ -217,9 +211,6 @@ private:
     Result ProcessMacksForDisclosedKey(const OsnmaDsmKroot& trusted_kroot,
         const GnssTime& disclosed_key_time,
         const GnssTime& authentication_time);
-
-    Result VerifyPendingMacks(const OsnmaDsmKroot& trusted_kroot,
-        const GnssTime& now);
 
     void LogEvent(PegasusLogEvent event,
         PegasusLogSeverity severity,
