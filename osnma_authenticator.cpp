@@ -69,6 +69,12 @@ FeedResult OsnmaAuthenticator::FeedPageParts(const GalileoInavPageParts& page)
     AuthReason nav_reason = AuthReason::None;
     (void)engine_.FeedNavigationPage(page, nav_reason);
 
+    if (!page.crc_ok)
+    {
+        out.status = GetStatus(page.prn, page.page_epoch);
+        return out;
+    }
+
     ParsedPage parsed{};
     AuthReason parse_reason = AuthReason::None;
 

@@ -396,10 +396,10 @@ bool PegasusCsvWriter::Write(const char* prefix,
         return false;
 
     const std::string base(prefix);
-    const std::filesystem::path eph_path(base + "_E_INAV.eph");
-    const std::filesystem::path iono_path(base + "_E_INAV.iono");
-    const std::filesystem::path dtime_path(base + "_E_INAV.dtime");
-    const std::filesystem::path log_path(base + "_E_INAV.log");
+    const std::filesystem::path eph_path(base + "_cnv.eph");
+    const std::filesystem::path iono_path(base + "_cnv.iono");
+    const std::filesystem::path dtime_path(base + "_cnv.dtime");
+    const std::filesystem::path log_path(base + "_cnv.osnmalog");
 
     std::FILE* eph = OpenFile(eph_path);
     std::FILE* iono = OpenFile(iono_path);

@@ -29,6 +29,8 @@
     <ClInclude Include="osnma_xml_material_loader.h" />
     <ClInclude Include="pegasus_nav_rows.h" />
     <ClInclude Include="pegasus_log_rows.h" />
+    <ClInclude Include="GALDataStructures.h" />
+    <ClInclude Include="pegasus_csv_writer.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="osnma_authenticator.cpp" />
@@ -69,5 +71,6 @@
     <ClCompile Include="third_party\mbedtls\library\sha256.c" />
     <ClCompile Include="third_party\mbedtls\library\sha3.c" />
     <ClCompile Include="third_party\mbedtls\library\sha512.c" />
+    <ClCompile Include="pegasus_csv_writer.cpp" />
   </ItemGroup>
 </Project>
