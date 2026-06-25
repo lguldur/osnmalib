@@ -15,6 +15,42 @@ namespace
     constexpr unsigned long GAL_SOURCE_INAV = 1u;
     constexpr unsigned char GAL_SOURCE_INAV_U8 = 1u;
 
+    /*
+        The page epochs supplied to osnmalib identify the transmission time
+        of the first bit of a complete two-second Galileo I/NAV page.
+
+        Pegasus RX_* and AUTH_* fields are availability/event times: the
+        complete page cannot be used until its final bit has been
+        transmitted.  Add the two-second page duration here and normalize
+        the GST week rollover before converting to the continuous GPS week.
+    */
+    constexpr double GALILEO_INAV_PAGE_DURATION_SECONDS = 2.0;
+    constexpr double GNSS_WEEK_DURATION_SECONDS = 604800.0;
+
+    void SetPegasusAvailabilityTime(const GnssTime& first_bit_tx_time,
+        int32_t& gps_week_out,
+        double& tom_out)
+    {
+        gps_week_out = PEGASUS_INVALID_WEEK;
+        tom_out = PEGASUS_INVALID_TOM;
+
+        if (!IsTimeValid(first_bit_tx_time))
+            return;
+
+        GnssTime availability_time = first_bit_tx_time;
+        availability_time.tow += GALILEO_INAV_PAGE_DURATION_SECONDS;
+
+        while (availability_time.tow >= GNSS_WEEK_DURATION_SECONDS)
+        {
+            availability_time.tow -= GNSS_WEEK_DURATION_SECONDS;
+            ++availability_time.wn;
+        }
+
+        gps_week_out =
+            availability_time.wn + GALILEO_GST_TO_GPS_WEEK_OFFSET;
+        tom_out = availability_time.tow;
+    }
+
     // RINEX 3.05 Galileo data-source field for an I/NAV message decoded
     // from E1-B, with clock parameters valid for the E5b/E1 pair:
     //   bit 0 = I/NAV E1-B
@@ -649,14 +685,16 @@ bool GalileoInavDecoder::MakePegasusEphRow(
 
     // RX_* is the Pegasus event time.  This authenticated repetition
     // becomes available only when OSNMA authentication completes.
-    out.rx_week = gps_week(data.authentication_time.wn);
-    out.rx_tom = data.authentication_time.tow;
+    SetPegasusAvailabilityTime(data.authentication_time,
+        out.rx_week,
+        out.rx_tom);
     out.prn = data.prn;
 
     out.auth_status = AuthState::Yes;
     out.auth_reason = AuthReason::None;
-    out.auth_week = gps_week(data.authentication_time.wn);
-    out.auth_tom = data.authentication_time.tow;
+    SetPegasusAvailabilityTime(data.authentication_time,
+        out.auth_week,
+        out.auth_tom);
     out.auth_adkd = data.authentication_adkd;
     out.auth_bits = data.auth_bits;
     out.nav_fingerprint = EphFingerprint(
@@ -721,14 +759,16 @@ bool GalileoInavDecoder::MakePegasusIonoRow(
     };
 
     // RX_* is the Pegasus event time, not the original WT5 page time.
-    out.rx_week = gps_week(data.authentication_time.wn);
-    out.rx_tom = data.authentication_time.tow;
+    SetPegasusAvailabilityTime(data.authentication_time,
+        out.rx_week,
+        out.rx_tom);
     out.prn = data.prn;
 
     out.auth_status = AuthState::Yes;
     out.auth_reason = AuthReason::None;
-    out.auth_week = gps_week(data.authentication_time.wn);
-    out.auth_tom = data.authentication_time.tow;
+    SetPegasusAvailabilityTime(data.authentication_time,
+        out.auth_week,
+        out.auth_tom);
     out.auth_adkd = data.authentication_adkd;
     out.auth_bits = data.auth_bits;
     out.nav_fingerprint = IonoFingerprint(
@@ -766,15 +806,17 @@ int32_t GalileoInavDecoder::MakePegasusDtimeRows(
         PegasusDtimeRow& out = out_rows[count++];
         out = PegasusDtimeRow{};
 
-        // The authenticated UTC row is emitted at authentication time.
-        out.rx_week = gps_week(data.authentication_time.wn);
-        out.rx_tom = data.authentication_time.tow;
+        // RX_* and AUTH_* are the page-completion availability time.
+        SetPegasusAvailabilityTime(data.authentication_time,
+            out.rx_week,
+            out.rx_tom);
         out.prn = data.prn;
 
         out.auth_status = AuthState::Yes;
         out.auth_reason = AuthReason::None;
-        out.auth_week = gps_week(data.authentication_time.wn);
-        out.auth_tom = data.authentication_time.tow;
+        SetPegasusAvailabilityTime(data.authentication_time,
+            out.auth_week,
+            out.auth_tom);
         out.auth_adkd = data.authentication_adkd;
         out.auth_bits = data.auth_bits;
         out.nav_fingerprint = DtimeFingerprint(
@@ -795,15 +837,17 @@ int32_t GalileoInavDecoder::MakePegasusDtimeRows(
         PegasusDtimeRow& out = out_rows[count++];
         out = PegasusDtimeRow{};
 
-        // The authenticated GGTO row is emitted at authentication time.
-        out.rx_week = gps_week(data.authentication_time.wn);
-        out.rx_tom = data.authentication_time.tow;
+        // RX_* and AUTH_* are the page-completion availability time.
+        SetPegasusAvailabilityTime(data.authentication_time,
+            out.rx_week,
+            out.rx_tom);
         out.prn = data.prn;
 
         out.auth_status = AuthState::Yes;
         out.auth_reason = AuthReason::None;
-        out.auth_week = gps_week(data.authentication_time.wn);
-        out.auth_tom = data.authentication_time.tow;
+        SetPegasusAvailabilityTime(data.authentication_time,
+            out.auth_week,
+            out.auth_tom);
         out.auth_adkd = data.authentication_adkd;
         out.auth_bits = data.auth_bits;
         out.nav_fingerprint = DtimeFingerprint(
@@ -853,9 +897,9 @@ bool GalileoInavDecoder::MakeReceivedPegasusEphRow(
     // therefore maps RX_* from authentication_time.  For the initial
     // unauthenticated row, RX_* must instead be the instant at which the
     // complete WT1..WT5 ephemeris first became available.
-    out.rx_week = candidate.ced_complete_time.wn +
-        GALILEO_GST_TO_GPS_WEEK_OFFSET;
-    out.rx_tom = candidate.ced_complete_time.tow;
+    SetPegasusAvailabilityTime(candidate.ced_complete_time,
+        out.rx_week,
+        out.rx_tom);
 
     out.auth_status = AuthState::Unknown;
     out.auth_reason = AuthReason::WaitingForAuthentication;
@@ -880,8 +924,9 @@ bool GalileoInavDecoder::MakeReceivedPegasusIonoRow(
         return false;
 
     const std::uint8_t* wt5 = word.even.data();
-    out.rx_week = word.page_epoch.wn + GALILEO_GST_TO_GPS_WEEK_OFFSET;
-    out.rx_tom = word.page_epoch.tow;
+    SetPegasusAvailabilityTime(word.page_epoch,
+        out.rx_week,
+        out.rx_tom);
     out.prn = candidate.prn;
     out.auth_status = AuthState::Unknown;
     out.auth_reason = AuthReason::WaitingForAuthentication;
@@ -899,8 +944,10 @@ bool GalileoInavDecoder::MakeReceivedPegasusIonoRow(
             storm_flags = static_cast<std::uint8_t>(storm_flags | (1u << i));
     }
     out.storm_flags = storm_flags;
-    out.tx_week = out.rx_week;
-    out.tx_tom = out.rx_tom;
+    // TX_* preserves the first-bit transmission epoch of the source page.
+    out.tx_week =
+        word.page_epoch.wn + GALILEO_GST_TO_GPS_WEEK_OFFSET;
+    out.tx_tom = word.page_epoch.tow;
     return true;
 }
 
@@ -922,8 +969,9 @@ bool GalileoInavDecoder::MakeReceivedPegasusDtimeRow(
         return false;
 
     const std::uint8_t* raw = word.even.data();
-    out.rx_week = word.page_epoch.wn + GALILEO_GST_TO_GPS_WEEK_OFFSET;
-    out.rx_tom = word.page_epoch.tow;
+    SetPegasusAvailabilityTime(word.page_epoch,
+        out.rx_week,
+        out.rx_tom);
     out.prn = candidate.prn;
     out.auth_status = AuthState::Unknown;
     out.auth_reason = AuthReason::WaitingForAuthentication;
@@ -931,8 +979,10 @@ bool GalileoInavDecoder::MakeReceivedPegasusDtimeRow(
     out.auth_bits = 0;
     out.nav_fingerprint = DtimeFingerprint(raw, wt, candidate.prn);
     out.a2.reset();
-    out.tx_week = out.rx_week;
-    out.tx_tom = out.rx_tom;
+    // TX_* preserves the first-bit transmission epoch of the source page.
+    out.tx_week =
+        word.page_epoch.wn + GALILEO_GST_TO_GPS_WEEK_OFFSET;
+    out.tx_tom = word.page_epoch.tow;
 
     if (wt == GAL_WT6)
     {

@@ -22,10 +22,18 @@
 
     RX_WEEK/RX_TOM is the time at which the row becomes available to
     Pegasus and is therefore the file synchronization key:
-      - initial unauthenticated row: navigation reception/completion time;
-      - authenticated repetition: authentication event time.
+      - initial unauthenticated row: end of the page that completed the
+        navigation object;
+      - authenticated repetition: end of the page that completed the
+        authentication event.
 
-    TX_WEEK/TX_TOM preserves the original navigation transmission/page time.
+    Internally, osnmalib receives the transmission time of the first bit of
+    each complete two-second Galileo I/NAV page.  RX_WEEK/RX_TOM is therefore
+    that internal page epoch plus two seconds, with week rollover normalized.
+
+    AUTH_WEEK/AUTH_TOM uses the same page-completion availability convention.
+
+    TX_WEEK/TX_TOM preserves the original first-bit transmission/page epoch.
 
     CSV formatting is intentionally kept outside these structures:
       - floating-point values: %.17g

@@ -1344,9 +1344,9 @@ bool OsnmaSelfTest::TestPegasusRowMapping(Result& result)
 
     if (!Check(result,
         eph.rx_week == 2421 &&
-        eph.rx_tom == 660.0 &&
+        eph.rx_tom == 662.0 &&
         eph.auth_week == 2421 &&
-        eph.auth_tom == 660.0 &&
+        eph.auth_tom == 662.0 &&
         eph.tx_tom == 620.0 &&
         eph.toc_week == 2421 &&
         eph.toe_week == 2421 &&
@@ -1372,8 +1372,8 @@ bool OsnmaSelfTest::TestPegasusRowMapping(Result& result)
 
     if (!Check(result,
         iono.rx_week == 2421 &&
-        iono.rx_tom == 660.0 &&
-        iono.auth_tom == 660.0 &&
+        iono.rx_tom == 662.0 &&
+        iono.auth_tom == 662.0 &&
         iono.tx_tom == 618.0 &&
         iono.storm_flags == 0x15u &&
         iono.ai0 == 21.0,
@@ -1412,17 +1412,42 @@ bool OsnmaSelfTest::TestPegasusRowMapping(Result& result)
         dtime_count == 2 &&
         dtime[0].target_time_system == PegasusTimeSystem::Utc &&
         dtime[0].rx_week == 2421 &&
-        dtime[0].rx_tom == 690.0 &&
-        dtime[0].auth_tom == 690.0 &&
+        dtime[0].rx_tom == 692.0 &&
+        dtime[0].auth_tom == 692.0 &&
         dtime[0].tx_tom == 624.0 &&
         dtime[0].reference_week == 2421 &&
         dtime[0].reference_tom == 43200.0 &&
         dtime[1].target_time_system == PegasusTimeSystem::Gps &&
-        dtime[1].rx_tom == 690.0 &&
-        dtime[1].auth_tom == 690.0 &&
+        dtime[1].rx_tom == 692.0 &&
+        dtime[1].auth_tom == 692.0 &&
         dtime[1].tx_tom == 628.0 &&
         dtime[1].reference_tom == 14400.0,
         "Pegasus dtime-row mapping failed"))
+    {
+        return false;
+    }
+
+    GalileoAuthenticatedCedStatus rollover_ced = ced;
+    rollover_ced.authentication_time = GnssTime{1397, 604799.0};
+
+    PegasusEphRow rollover_eph{};
+    if (!Check(result,
+        GalileoInavDecoder::MakePegasusEphRow(
+            rollover_ced,
+            rollover_eph),
+        "Pegasus rollover eph-row construction failed"))
+    {
+        return false;
+    }
+
+    if (!Check(result,
+        rollover_eph.rx_week == 2422 &&
+        rollover_eph.rx_tom == 1.0 &&
+        rollover_eph.auth_week == 2422 &&
+        rollover_eph.auth_tom == 1.0 &&
+        rollover_eph.tx_week == 2421 &&
+        rollover_eph.tx_tom == 620.0,
+        "Pegasus RX/AUTH week rollover mapping failed"))
     {
         return false;
     }
