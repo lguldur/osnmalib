@@ -260,7 +260,7 @@
       <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalIncludeDirectories>$(ProjectDir)third_party\mbedtls\include;$(ProjectDir)third_party\mbedtls\library;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
-      <AdditionalOptions>%(AdditionalOptions) /utf-8 /MP6</AdditionalOptions>
+      <AdditionalOptions>%(AdditionalOptions) /MP6</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>
@@ -281,7 +281,7 @@
       <AdditionalIncludeDirectories>$(ProjectDir)third_party\mbedtls\include;$(ProjectDir)third_party\mbedtls\library;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
-      <AdditionalOptions>%(AdditionalOptions) /utf-8 /MP6</AdditionalOptions>
+      <AdditionalOptions>%(AdditionalOptions) /MP6</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>
