@@ -691,7 +691,7 @@ bool GalileoInavDecoder::MakePegasusEphRow(
     SetPegasusAvailabilityTime(data.authentication_time,
         out.rx_week,
         out.rx_tom);
-    out.prn = data.prn;
+    out.prn = GalileoPrnToPegasusSvid(data.prn);
 
     out.auth_status = AuthState::Yes;
     out.auth_reason = AuthReason::None;
@@ -765,7 +765,7 @@ bool GalileoInavDecoder::MakePegasusIonoRow(
     SetPegasusAvailabilityTime(data.authentication_time,
         out.rx_week,
         out.rx_tom);
-    out.prn = data.prn;
+    out.prn = GalileoPrnToPegasusSvid(data.prn);
 
     out.auth_status = AuthState::Yes;
     out.auth_reason = AuthReason::None;
@@ -813,7 +813,7 @@ int32_t GalileoInavDecoder::MakePegasusDtimeRows(
         SetPegasusAvailabilityTime(data.authentication_time,
             out.rx_week,
             out.rx_tom);
-        out.prn = data.prn;
+        out.prn = GalileoPrnToPegasusSvid(data.prn);
 
         out.auth_status = AuthState::Yes;
         out.auth_reason = AuthReason::None;
@@ -844,7 +844,7 @@ int32_t GalileoInavDecoder::MakePegasusDtimeRows(
         SetPegasusAvailabilityTime(data.authentication_time,
             out.rx_week,
             out.rx_tom);
-        out.prn = data.prn;
+        out.prn = GalileoPrnToPegasusSvid(data.prn);
 
         out.auth_status = AuthState::Yes;
         out.auth_reason = AuthReason::None;
@@ -930,7 +930,7 @@ bool GalileoInavDecoder::MakeReceivedPegasusIonoRow(
     SetPegasusAvailabilityTime(word.page_epoch,
         out.rx_week,
         out.rx_tom);
-    out.prn = candidate.prn;
+    out.prn = GalileoPrnToPegasusSvid(candidate.prn);
     out.auth_status = AuthState::Unknown;
     out.auth_reason = AuthReason::WaitingForAuthentication;
     out.auth_adkd.reset();
@@ -975,7 +975,7 @@ bool GalileoInavDecoder::MakeReceivedPegasusDtimeRow(
     SetPegasusAvailabilityTime(word.page_epoch,
         out.rx_week,
         out.rx_tom);
-    out.prn = candidate.prn;
+    out.prn = GalileoPrnToPegasusSvid(candidate.prn);
     out.auth_status = AuthState::Unknown;
     out.auth_reason = AuthReason::WaitingForAuthentication;
     out.auth_adkd.reset();
@@ -1251,6 +1251,18 @@ bool GalileoAuthDataFifo::PopPegasusLogRow(PegasusLogRow& row)
 
     row = pegasus_log_rows_.front();
     pegasus_log_rows_.pop_front();
+
+    /*
+        Diagnostic rows are accumulated internally with OSNMA PRNs 1..36.
+        Convert at the public FIFO boundary so every consumer (not only the
+        built-in CSV writer) receives the Pegasus SVID convention 71..106.
+        Non-Galileo/special values are left unchanged.
+    */
+    if (row.prn.has_value())
+        row.prn = GalileoPrnToPegasusSvid(*row.prn);
+    if (row.related_prn.has_value())
+        row.related_prn = GalileoPrnToPegasusSvid(*row.related_prn);
+
     return true;
 }
 

@@ -1353,7 +1353,7 @@ bool OsnmaSelfTest::TestPegasusRowMapping(Result& result)
         eph.tx_tom == 620.0 &&
         eph.toc_week == 2421 &&
         eph.toe_week == 2421 &&
-        eph.prn == 7 &&
+        eph.prn == 77 &&
         eph.auth_status == AuthState::Yes &&
         eph.auth_reason == AuthReason::None &&
         eph.iodnav == 42 &&
@@ -1376,6 +1376,7 @@ bool OsnmaSelfTest::TestPegasusRowMapping(Result& result)
     if (!Check(result,
         iono.rx_week == 2421 &&
         iono.rx_tom == 662.0 &&
+        iono.prn == 77 &&
         iono.auth_tom == 662.0 &&
         iono.tx_tom == 618.0 &&
         iono.storm_flags == 0x15u &&
@@ -1413,6 +1414,8 @@ bool OsnmaSelfTest::TestPegasusRowMapping(Result& result)
 
     if (!Check(result,
         dtime_count == 2 &&
+        dtime[0].prn == 77 &&
+        dtime[1].prn == 77 &&
         dtime[0].target_time_system == PegasusTimeSystem::Utc &&
         dtime[0].rx_week == 2421 &&
         dtime[0].rx_tom == 692.0 &&
@@ -1458,6 +1461,23 @@ bool OsnmaSelfTest::TestPegasusRowMapping(Result& result)
     GalileoAuthDataFifo fifo{};
     fifo.PushCedStatus(ced);
     fifo.PushTiming(timing);
+
+    PegasusLogRow internal_log{};
+    internal_log.prn = 7;
+    internal_log.related_prn = 12;
+    fifo.PushLog(internal_log);
+
+    PegasusLogRow external_log{};
+    if (!Check(result,
+        fifo.PopPegasusLogRow(external_log) &&
+        external_log.prn.has_value() &&
+        external_log.prn.value() == 77 &&
+        external_log.related_prn.has_value() &&
+        external_log.related_prn.value() == 82,
+        "Pegasus log PRN-to-SVID mapping failed"))
+    {
+        return false;
+    }
 
     return Check(result,
         fifo.PegasusEphRowCount() == 1 &&

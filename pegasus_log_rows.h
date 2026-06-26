@@ -15,6 +15,9 @@
 /*
     One row of <prefix>_<system>_<nav_type>.log.
 
+    PRN and RELATED_PRN use the Pegasus Galileo SVID convention 71..106
+    when a Galileo satellite is identified.
+
     These events identify anomalies that may be caused by RF interference,
     receiver/data loss, malformed input, or implementation/configuration
     problems.  The log deliberately reports observations; it never claims
@@ -60,7 +63,7 @@ struct PegasusLogRow
     // Continuous GPS week including rollover and receiver/event TOM.
     std::optional<int32_t> rx_week{};
     std::optional<double> rx_tom{};
-    std::optional<int32_t> prn{};
+    std::optional<int32_t> prn{}; // Galileo SVID 71..106 in external rows.
 
     PegasusLogSeverity severity = PegasusLogSeverity::Warning;
     PegasusLogEvent event = PegasusLogEvent::PageRejected;
@@ -72,7 +75,7 @@ struct PegasusLogRow
     std::optional<int32_t> block_id{};
     std::optional<int32_t> tag_index{};
     std::optional<int32_t> ctr{};
-    std::optional<int32_t> related_prn{};
+    std::optional<int32_t> related_prn{}; // Galileo SVID 71..106.
     std::optional<OsnmaAdkd> adkd{};
     std::optional<int32_t> cop{};
     std::optional<std::int64_t> count{};

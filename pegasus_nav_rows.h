@@ -23,6 +23,9 @@
     All week numbers are continuous GPS weeks including rollover. For
     Galileo data decoded from GST, GPS_WEEK = GST_WEEK + 1024.
 
+    The fields named PRN use the Pegasus Galileo SVID convention 71..106.
+    osnmalib continues to use Galileo PRNs 1..36 internally.
+
     RX_WEEK/RX_TOM is the time at which the row becomes available to
     Pegasus and is therefore the file synchronization key:
       - initial unauthenticated row: end of the page that completed the
@@ -54,6 +57,27 @@ constexpr double PEGASUS_INVALID_TOM =
 constexpr int32_t GALILEO_GST_TO_GPS_WEEK_OFFSET = 1024;
 
 /*
+    Galileo satellite-number convention used in Pegasus CSV/output rows.
+
+    osnmalib uses the Galileo OSNMA PRN range 1..36 internally. Pegasus
+    uses the receiver/team SVID convention 71..106 in every column named
+    PRN (including RELATED_PRN in .osnmalog).
+*/
+constexpr int32_t GALILEO_PRN_TO_SVID_OFFSET = 70;
+
+constexpr bool IsGalileoOsnmaPrn(int32_t prn)
+{
+    return prn >= 1 && prn <= 36;
+}
+
+constexpr int32_t GalileoPrnToPegasusSvid(int32_t prn)
+{
+    return IsGalileoOsnmaPrn(prn)
+        ? prn + GALILEO_PRN_TO_SVID_OFFSET
+        : prn;
+}
+
+/*
     Stable external values used by TARGET_TIME_SYSTEM in .dtime rows.
 
     The source time system is implied by the file name. For example, in an
@@ -74,7 +98,7 @@ enum class PegasusTimeSystem : int32_t
 /* One row of <prefix>_<system>_<nav_type>.eph. */
 struct PegasusEphRow
 {
-    // "RX_WEEK";"RX_TOM";"PRN"
+    // "RX_WEEK";"RX_TOM";"PRN" (Galileo SVID 71..106)
     int32_t rx_week = PEGASUS_INVALID_WEEK;
     double rx_tom = PEGASUS_INVALID_TOM;
     int32_t prn = -1;
@@ -142,7 +166,7 @@ struct PegasusEphRow
 /* One row of <prefix>_<system>_<nav_type>.iono. */
 struct PegasusIonoRow
 {
-    // "RX_WEEK";"RX_TOM";"PRN"
+    // "RX_WEEK";"RX_TOM";"PRN" (Galileo SVID 71..106)
     int32_t rx_week = PEGASUS_INVALID_WEEK;
     double rx_tom = PEGASUS_INVALID_TOM;
     int32_t prn = -1;
@@ -176,7 +200,7 @@ struct PegasusIonoRow
 */
 struct PegasusDtimeRow
 {
-    // "RX_WEEK";"RX_TOM";"PRN"
+    // "RX_WEEK";"RX_TOM";"PRN" (Galileo SVID 71..106)
     int32_t rx_week = PEGASUS_INVALID_WEEK;
     double rx_tom = PEGASUS_INVALID_TOM;
     int32_t prn = -1;
