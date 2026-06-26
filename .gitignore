@@ -1,0 +1,81 @@
+# Visual Studio local files
+
+.vs/
+*.suo
+*.VC.db
+*.VC.VC.opendb
+*.vcxproj.user
+*.sln.docstates
+
+# IntelliSense and precompiled data
+
+ipch/
+*.ipch
+*.pch
+
+# Build directories
+
+Debug/
+Release/
+Debug*/
+Release*/
+Win32/
+x86/
+x64/
+build/
+out/
+cmake-build-*/
+
+# Compiler and linker intermediate files
+
+*.obj
+*.o
+*.idb
+*.ilk
+*.iobj
+*.ipdb
+*.tlog
+*.lastbuildstate
+*.recipe
+*.res
+
+# Compiled binaries and libraries
+
+*.exe
+*.dll
+*.lib
+*.exp
+*.pdb
+
+# Test and generated OSNMA output
+
+*.eph
+*.iono
+*.dtime
+*.osnmalog
+*.auth
+
+# Temporary and backup files
+
+*.tmp
+*.temp
+*.bak
+*.old
+*.orig
+*~
+~$*
+
+# Generated archives
+
+*.zip
+*.7z
+
+# Operating-system files
+
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Subversion administrative metadata
+
+.svn/

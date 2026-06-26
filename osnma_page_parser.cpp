@@ -1,3 +1,6 @@
+// Copyright (C) 2026 David Duchet
+// SPDX-License-Identifier: Apache-2.0
+
 #include "osnma_page_parser.h"
 #include "osnma_bit_utils.h"
 

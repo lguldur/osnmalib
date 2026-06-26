@@ -1,3 +1,6 @@
+// Copyright (C) 2026 David Duchet
+// SPDX-License-Identifier: Apache-2.0
+
 #include <algorithm>
 #include <array>
 #include <chrono>

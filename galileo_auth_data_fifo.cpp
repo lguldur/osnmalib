@@ -1,3 +1,6 @@
+// Copyright (C) 2026 David Duchet
+// SPDX-License-Identifier: Apache-2.0
+
 #include "galileo_auth_data_fifo.h"
 
 #include <cmath>

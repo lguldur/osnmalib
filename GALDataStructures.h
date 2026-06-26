@@ -1,4 +1,5 @@
-// Copyright (C) 2005 Eurocontrol
+// Copyright (C) 2026 David Duchet
+// SPDX-License-Identifier: Apache-2.0
 
 #ifndef _GALDATASTRUCTURES_INCLUDED
 #define _GALDATASTRUCTURES_INCLUDED
